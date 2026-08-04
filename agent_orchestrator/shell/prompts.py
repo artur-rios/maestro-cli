@@ -112,15 +112,27 @@ class Asker:
             return answer or default
         return self.line(label, default)
 
-    def command(self, prompt: str = ">") -> str:
-        """The main REPL line: history and editing when a terminal allows."""
-        if self.fancy:
-            try:
-                return questionary.text(
-                    "", qmark=prompt, style=STYLE
-                ).unsafe_ask() or ""
-            except (KeyboardInterrupt, EOFError):
-                raise
-            except Exception:  # noqa: BLE001
-                pass
-        return input(f"{prompt} ")
+    def command(self, prompt: str = ">", hint: str = "") -> str:
+        """The main input line, drawn as a box when a terminal allows.
+
+        prompt_toolkit owns the line the cursor sits on, so the box is drawn
+        around it: a top edge with the hint, the input line prefixed by an
+        edge character, and a bottom edge once the line is submitted.
+        """
+        if not self.fancy:
+            return input(f"{prompt} ")
+
+        from . import render
+
+        render.box_top(hint)
+        try:
+            answer = questionary.text(
+                "", qmark=render.BOX_LEFT + " " + prompt, style=STYLE
+            ).unsafe_ask()
+        except (KeyboardInterrupt, EOFError):
+            render.box_bottom()
+            raise
+        except Exception:  # noqa: BLE001
+            return input(f"{prompt} ")
+        render.box_bottom()
+        return answer or ""

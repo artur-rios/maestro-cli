@@ -18,7 +18,7 @@ APP_NAME = "ai-agent-orchestrator"
 
 #: Bumped whenever the built-in command templates change. A stored file from an
 #: older version has its built-in templates replaced on load.
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 
 #: Reserved key holding CONFIG_VERSION inside backends.json.
 VERSION_KEY = "_version"
@@ -36,6 +36,9 @@ DEFAULT_BACKENDS: dict[str, dict[str, Any]] = {
         "execute_args": ["-p", "--permission-mode", "acceptEdits"],
         # No list command; a model id is typed in.
         "model_flag": "--model",
+        # `claude --model` takes an alias for the current model of that
+        # size, so these stay correct as models are replaced. Edit freely.
+        "known_models": ["fable", "opus", "sonnet", "haiku"],
         "search_globs": [
             "~/.local/bin/claude.exe",
             "~/.local/bin/claude",
@@ -50,6 +53,9 @@ DEFAULT_BACKENDS: dict[str, dict[str, Any]] = {
         "args": ["exec", "-C", "{cwd}", "-s", "read-only"],
         "execute_args": ["exec", "-C", "{cwd}", "-s", "workspace-write"],
         "model_flag": "--model",
+        # `codex models` needs a terminal, so it cannot be read here. This is
+        # a starting point; add the ids you use to backends.json.
+        "known_models": ["gpt-5.6-terra"],
         # Codex installs to a stable directory in newer builds, and to one
         # named after the version in older ones. Neither is reliably on PATH.
         "search_globs": [

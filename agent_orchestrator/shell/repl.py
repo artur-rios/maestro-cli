@@ -136,55 +136,54 @@ class Shell:
 
     # ------------------------------------------------------------------ start
 
-    def greet(self) -> None:
+    def header(self) -> None:
+        """The wordmark and a status line. Drawn above every prompt."""
         session = self.session
         render.out()
         for part in render.banner(render.width(), __version__):
             render.out(part)
 
-        status = Text("  ")
-        for index, (name, ok) in enumerate(backends.available()):
-            if index:
-                status.append("  ")
-            status.append(name, style="success" if ok else "error")
-        repo = session.settings.get("repo") or str(session.cwd)
-        status.append(f"   repo {Path(repo).name}", style="muted")
-        render.out()
-        render.out(status)
-
         runs = session.store.all()
-        waiting = sum(1 for w in runs if w.status is Status.AWAITING_APPROVAL)
-        line = Text("  ")
-        if runs:
-            line.append(render.plural(len(runs), "run"))
-            line.append("  ")
-        if waiting:
-            line.append(f"{waiting} awaiting approval", style="warning")
-            line.append("  ")
-        line.append("/help for commands", style="muted")
-        render.out(line)
+        render.out()
+        render.line(render.status_bar(
+            backends.available(),
+            Path(session.settings.get("repo") or str(session.cwd)).name,
+            len(runs),
+            sum(1 for w in runs if w.status is Status.AWAITING_APPROVAL),
+        ))
+        render.out()
 
-        orphans = session.runner.adopt_orphans()
+    def greet(self) -> None:
+        self.header()
+        orphans = self.session.runner.adopt_orphans()
         if orphans:
-            render.out()
             render.warn(
                 f"{render.plural(orphans, 'run')} interrupted when the "
                 f"orchestrator last exited - /resume to continue"
             )
-        for wf in session.store.all():
-            session.notices.seed(wf)
-        render.out()
+            render.out()
+        for wf in self.session.store.all():
+            self.session.notices.seed(wf)
 
     # ------------------------------------------------------------------- loop
 
     def run(self) -> int:
         self.greet()
+        first = True
 
         while True:
+            # Redraw the header so the wordmark stays at the top of the
+            # screen. The previous command's output has been read by now --
+            # the user had to look at it to decide what to type next.
+            if not first and self.session.settings.get("pinned", True):
+                render.clear()
+                self.header()
+            first = False
+
             for line in self.session.notices.drain(self.session.store.all()):
                 render.out(line)
             try:
-                raw = self.session.asker.command()
+                raw = self.session.asker.command(hint=self.hint())
             except KeyboardInterrupt:
                 render.out()
                 continue
@@ -195,6 +194,16 @@ class Shell:
 
             if not self.handle(raw):
                 return 0
+
+    def hint(self) -> str:
+        """What to write in the top edge of the input box."""
+        waiting = sum(
+            1 for w in self.session.store.all()
+            if w.status is Status.AWAITING_APPROVAL
+        )
+        if waiting:
+            return f"{waiting} awaiting approval - /approve"
+        return "type a task, @prompt or /help"
 
     def handle(self, raw: str) -> bool:
         """Act on one line. False means the session should end."""

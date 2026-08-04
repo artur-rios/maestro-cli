@@ -18,6 +18,10 @@ from .promptlib import PromptError
 from .render import console
 
 
+#: Offered at the end of every model list, for an id not on it.
+OTHER_MODEL = "other (type it)"
+
+
 class CommandError(Exception):
     """Anything the user should see as one line, not a traceback."""
 
@@ -245,14 +249,14 @@ def _ask_model(session, backend_name: str, role_label: str, current: str) -> str
     if not backend.get("model_flag"):
         return ""
 
-    choices = [name for name, _ in backends.list_options(backend, "model")]
+    choices = backends.model_choices(backend)
     label = role_label.replace(" agent", " model")
 
     if choices:
-        # A picker beats typing one of forty names; the first entry keeps
-        # whatever the CLI would choose for itself.
+        # Always a picker: the first entry keeps whatever the CLI would
+        # choose, the last is an escape hatch for an id not on the list.
         default_label = f"({backend_name} default)"
-        options = [default_label, *choices]
+        options = [default_label, *choices, OTHER_MODEL]
         picked = session.ask_select(
             label, options, current if current in choices else default_label
         )
@@ -260,11 +264,19 @@ def _ask_model(session, backend_name: str, role_label: str, current: str) -> str
             return ""
         if picked in choices:
             return picked
-        current = picked  # typed by hand in a non-interactive session
-    else:
-        configured = backends.current_flag_value(backend, Role.PLAN, "model_flag")
-        hint = f" e.g. {configured}" if configured else ""
-        render.muted(f"  {backend_name} model - blank for its default{hint}")
+        if picked == OTHER_MODEL:
+            render.muted(
+                f"  ids you use often belong in known_models in "
+                f"{config.backends_path().name}"
+            )
+            return session.ask_line(label, "").strip()
+        # Typed straight in, which is how the plain fallback answers a
+        # select. Take it as given rather than asking a second time.
+        return picked.strip()
+
+    configured = backends.current_flag_value(backend, Role.PLAN, "model_flag")
+    hint = f" e.g. {configured}" if configured else ""
+    render.muted(f"  {backend_name} model - blank for its default{hint}")
 
     def check(value: str) -> str:
         wanted = (value or "").strip()

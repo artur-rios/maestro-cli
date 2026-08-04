@@ -23,7 +23,7 @@ pip install -e .
  / ___ |_/ /        / /_/ / /  / /__/ / / /
 /_/  |_/___/        \____/_/   \___/_/ /_/
 
-  AI AGENT ORCHESTRATOR  v1.0.0
+  AI AGENT ORCHESTRATOR  v2.0.0
 
   claude  codex  opencode   repo identity-manager-api
   3 runs  1 awaiting approval  /help for commands
@@ -81,6 +81,23 @@ Python 3.10+, `git`, and three libraries: `click` for the command structure,
 required -- with piped input every prompt falls back to plain reads, so the
 tool stays scriptable.
 
+## The screen
+
+The wordmark and status line are redrawn above every prompt, so what is
+installed, which repo you are pointed at and how many runs are waiting stay in
+view rather than scrolling away. The input sits in a box whose top edge carries
+the hint -- or a nudge, when something is waiting for you:
+
+```
+╭ 1 awaiting approval - /approve ──────────────────────────────────────────╮
+│ > add rate limiting to the scope endpoints
+╰──────────────────────────────────────────────────────────────────────────╯
+```
+
+`/set pinned off` returns to a plain scrolling log if you would rather keep the
+scrollback. Without a terminal -- piped input, a captured test -- the box and
+the screen clearing are skipped and the prompt degrades to a plain `>`.
+
 ## Commands
 
 | | |
@@ -131,11 +148,13 @@ offers the current value; pressing Enter keeps it:
   Save these as your defaults? [y/N]
 ```
 
-Each role is asked for its agent and then that agent's model. A backend that
-can enumerate its models lists them and matches a partial name -- `glm-5.2`
-above resolves to `opencode-go/glm-5.2`. claude and codex have no list command,
-so their model is typed in. Blank always means whatever the CLI would pick on
-its own.
+Each role is asked for its agent and then that agent's model, and the model is
+always chosen from a list. opencode enumerates its own 42; claude and codex
+cannot -- `claude` has no list command and `codex models` insists on a terminal
+-- so they fall back to `known_models` in `backends.json`, seeded with claude's
+aliases (`fable`, `opus`, `sonnet`, `haiku`) and editable for the ids you use.
+Every list starts with the CLI's own default and ends with *other (type it)*
+for an id not on it.
 
 A value that will not do -- an agent that is not installed, a round count of
 zero -- is explained and asked again rather than accepted. The summary then
@@ -563,6 +582,6 @@ unmodified.
 python -m unittest discover -s tests -t .
 ```
 
-426 tests. The unit tests fake git and the CLIs; the integration tests drive a
+431 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.

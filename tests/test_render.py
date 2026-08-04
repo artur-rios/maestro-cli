@@ -8,7 +8,11 @@ from unittest import mock
 from rich.console import Console
 
 from agent_orchestrator.models import Mode, Status, Step, Role, Task, Workflow
+import re
+
 from agent_orchestrator.shell import prompts, render
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def draw(renderable, width=100) -> str:
@@ -251,3 +255,46 @@ class PromptFallbacks(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class InputBox(unittest.TestCase):
+    """The prompt is drawn as a box around the line prompt_toolkit owns."""
+
+    def capture(self, fn, *args):
+        buffer = io.StringIO()
+        console = Console(theme=render.THEME, file=buffer, width=60,
+                          force_terminal=True, legacy_windows=False)
+        with mock.patch.object(render, "console", console):
+            fn(*args)
+        return buffer.getvalue()
+
+    def test_the_top_edge_carries_the_hint(self):
+        out = self.capture(render.box_top, "type a task or /help")
+        self.assertIn("type a task or /help", out)
+
+    def test_both_edges_are_drawn(self):
+        top = self.capture(render.box_top, "")
+        bottom = self.capture(render.box_bottom)
+        self.assertTrue(top.strip())
+        self.assertTrue(bottom.strip())
+
+    def test_the_edges_are_the_same_width(self):
+        top = ANSI_RE.sub("", self.capture(render.box_top, "")).strip("\n")
+        bottom = ANSI_RE.sub("", self.capture(render.box_bottom)).strip("\n")
+        self.assertEqual(len(top), len(bottom))
+
+
+class StatusBar(unittest.TestCase):
+    def test_it_shows_the_agents_and_the_repo(self):
+        bar = render.status_bar([("claude", True), ("codex", False)], "my-api", 3, 1)
+        text = bar.plain
+        self.assertIn("claude", text)
+        self.assertIn("codex", text)
+        self.assertIn("my-api", text)
+        self.assertIn("3 runs", text)
+        self.assertIn("1 awaiting approval", text)
+
+    def test_counts_are_omitted_when_zero(self):
+        text = render.status_bar([("claude", True)], "api", 0, 0).plain
+        self.assertNotIn("run", text)
+        self.assertNotIn("awaiting", text)

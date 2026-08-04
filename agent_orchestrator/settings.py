@@ -31,6 +31,8 @@ DEFAULTS: dict[str, Any] = {
     "attempts": 3,
     "confirm": True,
     "follow": True,
+    # Redraw the wordmark above every prompt.
+    "pinned": True,
     "branch_type": "",
     # Appended to every agent prompt, for standing house rules.
     "instructions": "",
@@ -51,6 +53,7 @@ EDITABLE: dict[str, str] = {
     "attempts": "int",
     "confirm": "bool",
     "follow": "bool",
+    "pinned": "bool",
     "branch_type": "text",
     "instructions": "text",
 }

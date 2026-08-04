@@ -265,6 +265,19 @@ def list_options(backend: dict[str, Any], kind: str) -> list[tuple[str, str]]:
     return found
 
 
+def model_choices(backend: dict[str, Any]) -> list[str]:
+    """Models to offer for a backend.
+
+    Whatever the CLI can enumerate, else the list configured for it. codex
+    has a `models` command but it insists on a terminal, and claude has none
+    at all, so both rely on `known_models` from backends.json.
+    """
+    listed = [name for name, _ in list_options(backend, "model")]
+    if listed:
+        return listed
+    return [str(m) for m in backend.get("known_models", []) if m]
+
+
 def list_agents(backend: dict[str, Any]) -> list[tuple[str, str]]:
     return list_options(backend, "agent")
 

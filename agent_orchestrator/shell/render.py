@@ -138,6 +138,70 @@ def field(label: str, value: RenderableType, label_width: int = 8) -> None:
 # -------------------------------------------------------------------- banner
 
 
+class _Box:
+    """Edge characters, falling back to ASCII where box drawing will not render."""
+
+    def __init__(self, plain: bool) -> None:
+        self.h = "-" if plain else "─"
+        self.v = "|" if plain else "│"
+        self.tl, self.tr = ("+", "+") if plain else ("╭", "╮")
+        self.bl, self.br = ("+", "+") if plain else ("╰", "╯")
+
+
+def _box() -> _Box:
+    return _Box(console.options.legacy_windows or not console.is_terminal)
+
+
+#: The left edge drawn beside the input line itself.
+BOX_LEFT = "│"
+
+
+def _box_width() -> int:
+    return max(10, min(console.size.width, 100) - 2)
+
+
+def box_top(hint: str = "") -> None:
+    """Top edge of the input box, with an optional hint written into it."""
+    box = _box()
+    label = f" {hint} " if hint else ""
+    fill = box.h * max(0, _box_width() - len(label))
+    console.print(f"[muted]{box.tl}{label}{fill}{box.tr}[/]",
+                  highlight=False, no_wrap=True)
+
+
+def box_bottom() -> None:
+    box = _box()
+    console.print(f"[muted]{box.bl}{box.h * _box_width()}{box.br}[/]",
+                  highlight=False, no_wrap=True)
+
+
+def line(text: RenderableType) -> None:
+    """Print one line that must not wrap, such as the status bar."""
+    console.print(text, no_wrap=True, overflow="ellipsis")
+
+
+def clear() -> None:
+    """Wipe the screen, when there is a screen to wipe."""
+    if console.is_terminal:
+        console.clear()
+
+
+def status_bar(agents: list[tuple[str, bool]], repo: str, runs: int,
+               waiting: int) -> Text:
+    """One line under the wordmark: what is installed and what is pending."""
+    line = Text("  ")
+    for index, (name, ok) in enumerate(agents):
+        if index:
+            line.append("  ")
+        line.append(name, style="success" if ok else "error")
+    line.append(f"   {repo}", style="muted")
+    if runs:
+        line.append(f"   {plural(runs, 'run')}", style="muted")
+    if waiting:
+        line.append(f"   {waiting} awaiting approval", style="warning")
+    return line
+
+
 def banner(term_width: int | None = None, version: str = "") -> list[RenderableType]:
     """The wordmark, or a plain title when the terminal is too narrow."""
     term_width = term_width if term_width is not None else width()
