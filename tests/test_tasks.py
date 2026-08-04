@@ -108,7 +108,7 @@ class TaskRunnerTestCase(unittest.TestCase):
         """`commits_on` limits which execute calls actually commit."""
         execute_calls = {"n": 0}
 
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             self.prompts_seen.append((role, prompt))
             if role is Role.PLAN:
                 return RunResult(0, plan)
@@ -257,7 +257,7 @@ class TimeoutHandling(TaskRunnerTestCase):
     """A timeout must not throw away work the agent already committed."""
 
     def agent_that(self, timed_out=False, exit_code=0, commits=True):
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             self.prompts_seen.append((role, prompt))
             if role is Role.PLAN:
                 return RunResult(0, "plan\n\nTASKS:\n1. only item\n")
@@ -301,7 +301,7 @@ class TimeoutHandling(TaskRunnerTestCase):
         wf = self.make(max_attempts=2)
         calls = {"n": 0}
 
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             self.prompts_seen.append((role, prompt))
             if role is Role.PLAN:
                 return RunResult(0, "plan\n\nTASKS:\n1. only item\n")
@@ -331,7 +331,7 @@ class TimeoutHandling(TaskRunnerTestCase):
         """Planning has no commits to measure, so a timeout is terminal."""
         wf = self.make(max_attempts=3)
 
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             return RunResult(-1, "thinking...", timed_out=True)
 
         self.drive(wf, _run)

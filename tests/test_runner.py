@@ -73,7 +73,7 @@ class RunnerTestCase(unittest.TestCase):
         """Return a stand-in for backends.run driven by role."""
         reviews = list(review_outputs or [APPROVE])
 
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             self.calls.append((role, prompt))
             if role is Role.PLAN:
                 return RunResult(0, plan)
@@ -121,6 +121,38 @@ class HappyPaths(RunnerTestCase):
         self.drive(wf, self.fake_agent(plan="STEP ONE: do the thing"))
         execute_prompt = next(p for role, p in self.calls if role is Role.EXECUTE)
         self.assertIn("STEP ONE: do the thing", execute_prompt)
+
+    def test_each_step_is_run_with_the_model_chosen_for_its_role(self):
+        wf = self.make(mode=Mode.AUTONOMOUS)
+        wf.models = {"plan": "opus", "execute": "glm-5.2", "review": "sonnet"}
+        seen = {}
+
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
+            seen[role.value] = model
+            if role is Role.EXECUTE:
+                self.commits += 1
+                return RunResult(0, "done")
+            return RunResult(0, "x" if role is Role.PLAN else APPROVE)
+
+        self.drive(wf, _run)
+        self.assertEqual(seen, {"plan": "opus", "execute": "glm-5.2",
+                                "review": "sonnet"})
+
+    def test_a_role_without_a_model_gets_an_empty_one(self):
+        wf = self.make(mode=Mode.AUTONOMOUS)
+        wf.models = {"execute": "glm-5.2"}
+        seen = {}
+
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
+            seen[role.value] = model
+            if role is Role.EXECUTE:
+                self.commits += 1
+                return RunResult(0, "done")
+            return RunResult(0, "x" if role is Role.PLAN else APPROVE)
+
+        self.drive(wf, _run)
+        self.assertEqual(seen["plan"], "")
+        self.assertEqual(seen["execute"], "glm-5.2")
 
     def test_the_diff_is_passed_to_the_review_agent(self):
         wf = self.make()
@@ -173,7 +205,7 @@ class Failures(RunnerTestCase):
     def test_nonzero_exit_fails_the_run(self):
         wf = self.make()
 
-        def failing(name, role, prompt, cwd, log_file, backends=None):
+        def failing(name, role, prompt, cwd, log_file, backends=None, model=""):
             return RunResult(2, "boom")
 
         self.drive(wf, failing)
@@ -184,7 +216,7 @@ class Failures(RunnerTestCase):
     def test_timeout_fails_the_run(self):
         wf = self.make()
 
-        def slow(name, role, prompt, cwd, log_file, backends=None):
+        def slow(name, role, prompt, cwd, log_file, backends=None, model=""):
             return RunResult(-1, "", timed_out=True)
 
         self.drive(wf, slow)
@@ -194,7 +226,7 @@ class Failures(RunnerTestCase):
     def test_missing_cli_fails_the_run_with_a_readable_message(self):
         wf = self.make()
 
-        def missing(name, role, prompt, cwd, log_file, backends=None):
+        def missing(name, role, prompt, cwd, log_file, backends=None, model=""):
             raise BackendError("'codex' is not on PATH")
 
         self.drive(wf, missing)

@@ -20,7 +20,8 @@ prompt files can be browsed or referenced by name.
 | Starting a run | Defaults resolve everything; a summary; Enter runs, `c` opens each setting for editing, `n` cancels |
 | Per-run tuning | Inline flags after the task, which never change the defaults |
 | Saved prompts | `/prompts` to browse, `@name` to reference |
-| Background runs | Inline notices printed above the next prompt |
+| Background runs | Logs are followed from the moment a run starts; Ctrl-C returns to the prompt and the run continues. Afterwards, inline notices above the next prompt |
+| Models | Chosen per run, per role, and injected at invocation rather than stored in the backend |
 | The old menu | Deleted; every function has a command equivalent |
 
 ## Session
@@ -41,10 +42,17 @@ Anything not beginning with `/` is the task.
 
 ## Configuring a run
 
-The summary is shown first. `c` asks for each setting in turn -- the agent for
-each of the three roles, the mode, the rework rounds, the attempts per step,
-and the branch -- with the current value offered as the default, so Enter keeps
-it. A rejected value (an uninstalled agent, a count below one) is explained and
+The summary is shown first. `c` asks for each setting in turn -- for each of
+the three roles its agent and then that agent's model, followed by the mode,
+the rework rounds, the attempts per step, and the branch -- with the current
+value offered as the default, so Enter keeps it.
+
+Models belong to the run, not to the backend. A backend that can enumerate its
+models offers them and matches a partial name; claude and codex have no list
+command, so theirs is typed. A blank answer leaves the CLI to choose. The
+chosen model is stored on the workflow and injected into the command line at
+invocation time, replacing whatever the backend was configured with, so a run
+can pick a model without editing shared settings. A rejected value (an uninstalled agent, a count below one) is explained and
 asked again; nothing is accepted that would fail later. The summary then
 reappears, so a run never starts on settings the user has not seen in final
 form.

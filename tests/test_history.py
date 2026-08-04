@@ -53,7 +53,7 @@ class Resuming(unittest.TestCase):
         return wf
 
     def agent(self):
-        def _run(name, role, prompt, cwd, log_file, backends=None):
+        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
             if role is Role.EXECUTE:
                 self.execute_prompts.append(prompt)
                 self.commits += 1

@@ -141,6 +141,43 @@ class Models(unittest.TestCase):
             self.assertTrue(backend.get("model_flag"), f"{name} has no model_flag")
 
 
+class PerRunModel(unittest.TestCase):
+    """A run may pick a model without editing anyone's settings."""
+
+    def test_it_replaces_the_configured_one(self):
+        backend = config.DEFAULT_BACKENDS["opencode"]
+        argv = backends.build_argv(backend, Role.EXECUTE, "x", "/tree")
+        argv = backends.with_model(argv, backend, "opencode-go/glm-5.2")
+        self.assertEqual(argv.count("--model"), 1)
+        self.assertIn("opencode-go/glm-5.2", argv)
+
+    def test_it_is_added_when_none_was_configured(self):
+        backend = config.DEFAULT_BACKENDS["claude"]
+        argv = backends.build_argv(backend, Role.PLAN, "x", "/tree")
+        self.assertNotIn("--model", argv)
+        argv = backends.with_model(argv, backend, "opus-4.6")
+        self.assertEqual(argv[-2:], ["--model", "opus-4.6"])
+
+    def test_a_blank_model_changes_nothing(self):
+        backend = config.DEFAULT_BACKENDS["codex"]
+        argv = backends.build_argv(backend, Role.EXECUTE, "x", "/tree")
+        self.assertEqual(backends.with_model(argv, backend, ""), argv)
+
+    def test_a_backend_without_the_flag_is_untouched(self):
+        backend = {"bin": "x", "args": ["run"]}
+        argv = ["x", "run"]
+        self.assertEqual(backends.with_model(argv, backend, "whatever"), argv)
+
+    def test_all_three_backends_accept_one(self):
+        for name in ("claude", "codex", "opencode"):
+            backend = config.DEFAULT_BACKENDS[name]
+            argv = backends.with_model(
+                backends.build_argv(backend, Role.EXECUTE, "x", "/tree"),
+                backend, "chosen-model",
+            )
+            self.assertIn("chosen-model", argv, name)
+
+
 class Defaults(unittest.TestCase):
     def test_opencode_reads_with_plan_and_writes_with_build(self):
         """Its read-only agent cannot implement anything - that split matters."""

@@ -27,14 +27,27 @@ python orchestrator.py
   Enter to run, c to change, n to cancel:
 
   started 7f2a1c
+  following - Ctrl-C returns to the prompt
 
-[7f2a1c] 2/4 tasks done
->
+------------ plan | claude | round 1 | started ------------
+Reading src/Api/ScopeController.cs ...
 ```
 
 Anything that is not a slash command **is the task**. Everything else -- runs,
-logs, approvals, settings -- is a command. Runs continue in the background, and
-a short notice appears above your next prompt when one moves on.
+logs, approvals, settings -- is a command.
+
+A new run's logs are followed straight away, so you watch it work rather than
+wondering whether it started. Ctrl-C leaves the log and returns to the prompt;
+the run carries on regardless, and a short notice appears above your next
+prompt when it moves on:
+
+```
+[7f2a1c] 2/4 tasks done
+[7f2a1c] awaiting approval - /approve 7f2a1c
+```
+
+`/set follow off` starts runs quietly instead, and `/logs <id>` or
+`/watch <id>` picks any run back up later.
 
 No dependencies beyond Python 3.10+ and `git`.
 
@@ -72,8 +85,14 @@ offers the current value; pressing Enter keeps it:
   Enter keeps the value shown.
   available: claude, codex, opencode
   plan agent [claude]:
-  execute agent [opencode]: claude
+    claude model - blank for its default
+  plan model []: opus-4.6
+  execute agent [opencode]:
+    opencode models: opencode/big-pickle, opencode-go/glm-5.2, ... +40 more
+  execute model []: glm-5.2
   review agent [codex]:
+    codex model - blank for its default
+  review model []:
   mode (supervised/autonomous) [supervised]: auto
   rework rounds [2]: 4
   attempts per step [3]:
@@ -81,6 +100,12 @@ offers the current value; pressing Enter keeps it:
 
   Save these as your defaults? [y/N]
 ```
+
+Each role is asked for its agent and then that agent's model. A backend that
+can enumerate its models lists them and matches a partial name -- `glm-5.2`
+above resolves to `opencode-go/glm-5.2`. claude and codex have no list command,
+so their model is typed in. Blank always means whatever the CLI would pick on
+its own.
 
 A value that will not do -- an agent that is not installed, a round count of
 zero -- is explained and asked again rather than accepted. The summary then
@@ -102,17 +127,28 @@ fix the flaky checkout test --execute codex --mode auto
 @scope-spec --repo ../other-api --branch fix/scope-lookup --attempts 5
 ```
 
-`--plan --execute --review --mode --repo --base --branch --rounds --attempts`,
-written as `--flag value` or `--flag=value`. An unrecognised flag is refused
-rather than absorbed into the task, so a typo cannot silently end up in a
-prompt.
+`--plan --execute --review --model --plan-model --execute-model --review-model
+--mode --repo --base --branch --rounds --attempts`, written as `--flag value`
+or `--flag=value`. `--model` sets every role at once; a per-role one overrides
+it:
+
+```
+add rate limiting --model sonnet-4.6 --execute-model opus-4.6
+```
+
+An unrecognised flag is refused rather than absorbed into the task, so a typo
+cannot silently end up in a prompt.
 
 Persistent defaults live in `/config` and are changed with `/set`:
 
 ```
 /set mode autonomous      /set execute opencode      /set attempts 5
-/set repo D:\code\api     /set confirm off
+/set repo D:\code\api     /set confirm off           /set follow off
+/set execute_model opencode-go/glm-5.2
 ```
+
+`/model <backend> <value>` changes the model a backend uses by default for
+everything; the per-run choice above overrides it without touching that.
 
 ## Saved prompts
 
@@ -453,6 +489,6 @@ prose -- cheap to test.
 python -m unittest discover -s tests -t .
 ```
 
-335 tests. The unit tests fake git and the CLIs; the integration tests drive a
+353 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.

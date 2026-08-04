@@ -43,6 +43,8 @@ class ShellTestCase(unittest.TestCase):
             return self.lines.pop(0) if self.lines else default
 
         self.session.ask_line = ask_line
+        # Following is exercised by its own tests; elsewhere it is noise.
+        self.session.settings["follow"] = False
 
     def tearDown(self):
         if self._old is None:
@@ -492,7 +494,8 @@ class StartingRuns(ShellTestCase):
         self.lines = ["c"]
         self.do("add rate limiting")
         asked = [label for label, _ in self.asked]
-        for expected in ("plan agent", "execute agent", "review agent",
+        for expected in ("plan agent", "plan model", "execute agent", "execute model",
+                         "review agent", "review model",
                          "mode (supervised/autonomous)", "rework rounds",
                          "attempts per step", "branch"):
             self.assertIn(expected, asked)
@@ -519,8 +522,11 @@ class StartingRuns(ShellTestCase):
 
     def test_typed_values_are_used(self):
         self.lines = [
-            "c", "codex", "claude", "opencode", "auto", "4", "6",
-            "fix/my-branch",
+            "c",
+            "codex", "",        # plan agent, plan model
+            "claude", "",       # execute
+            "opencode", "",     # review
+            "auto", "4", "6", "fix/my-branch",
         ]
         self.do("add rate limiting")
         wf = self.started()
@@ -532,7 +538,7 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(wf.branch, "fix/my-branch")
 
     def test_a_bad_value_is_asked_again(self):
-        self.lines = ["c", "claude", "opencode", "codex", "sideways", "auto"]
+        self.lines = ["c", "claude", "", "opencode", "", "codex", "", "sideways", "auto"]
         out = self.do("add rate limiting")
         self.assertIn("supervised", out)  # the complaint
         self.assertIs(self.started().mode, Mode.AUTONOMOUS)
@@ -544,13 +550,13 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(self.started().agents["plan"], "claude")
 
     def test_a_zero_round_count_is_asked_again(self):
-        self.lines = ["c", "claude", "opencode", "codex", "supervised", "0", "2"]
+        self.lines = ["c", "claude", "", "opencode", "", "codex", "", "supervised", "0", "2"]
         out = self.do("add rate limiting")
         self.assertIn("1 or more", out)
         self.assertEqual(self.started().max_rounds, 2)
 
     def test_edits_can_be_saved_as_the_new_defaults(self):
-        self.lines = ["c", "codex", "codex", "codex", "auto", "5", "7"]
+        self.lines = ["c", "codex", "", "codex", "", "codex", "", "auto", "5", "7"]
         self.confirm = True  # yes to "save these as your defaults?"
         self.do("add rate limiting")
 
@@ -561,7 +567,7 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(saved["attempts"], 7)
 
     def test_edits_are_not_saved_unless_asked(self):
-        self.lines = ["c", "codex", "codex", "codex", "auto", "5", "7"]
+        self.lines = ["c", "codex", "", "codex", "", "codex", "", "auto", "5", "7"]
         self.confirm = False  # no to saving
         self.do("add rate limiting")
 
@@ -576,6 +582,86 @@ class StartingRuns(ShellTestCase):
         out = self.do("add rate limiting")
         self.assertIn("Enter to run", out)
         self.started()  # the second answer ran it
+
+    def test_a_model_is_offered_for_every_role(self):
+        self.lines = ["c"]
+        self.do("add rate limiting")
+        asked = [label for label, _ in self.asked]
+        self.assertIn("plan model", asked)
+        self.assertIn("execute model", asked)
+        self.assertIn("review model", asked)
+
+    def test_a_chosen_model_reaches_the_workflow(self):
+        self.lines = [
+            "c",
+            "claude", "opus-4.6",
+            "opencode", "opencode-go/glm-5.2",
+            "codex", "",
+        ]
+        self.do("add rate limiting")
+        wf = self.started()
+        self.assertEqual(wf.models["plan"], "opus-4.6")
+        self.assertEqual(wf.models["execute"], "opencode-go/glm-5.2")
+        self.assertNotIn("review", wf.models)  # blank means the CLI's default
+
+    def test_a_blank_model_leaves_the_backend_alone(self):
+        self.lines = ["c"]
+        self.do("add rate limiting")
+        self.assertEqual(self.started().models, {})
+
+    def test_the_model_flag_applies_to_every_role(self):
+        self.do("add rate limiting --model sonnet-4.6")
+        wf = self.started()
+        self.assertEqual(
+            wf.models, {"plan": "sonnet-4.6", "execute": "sonnet-4.6",
+                        "review": "sonnet-4.6"}
+        )
+
+    def test_a_per_role_model_flag_wins(self):
+        self.do("add rate limiting --model sonnet --execute-model opus")
+        wf = self.started()
+        self.assertEqual(wf.models["execute"], "opus")
+        self.assertEqual(wf.models["plan"], "sonnet")
+
+    def test_models_are_shown_in_the_summary(self):
+        out = self.do("add rate limiting --model sonnet-4.6")
+        self.assertIn("models:", out)
+        self.assertIn("sonnet-4.6", out)
+
+    def test_a_model_default_can_be_set_and_is_used(self):
+        self.session.settings["execute_model"] = "opencode-go/glm-5.2"
+        self.do("add rate limiting")
+        self.assertEqual(self.started().models["execute"], "opencode-go/glm-5.2")
+
+    def test_models_are_saved_with_the_other_defaults(self):
+        self.lines = ["c", "claude", "opus-4.6", "opencode", "", "codex", ""]
+        self.confirm = True
+        self.do("add rate limiting")
+        self.assertEqual(settings_mod.load()["plan_model"], "opus-4.6")
+
+    def test_the_logs_are_followed_as_soon_as_it_starts(self):
+        self.session.settings["follow"] = True
+        with mock.patch.object(commands.logview, "stream") as stream:
+            out = self.do("add rate limiting")
+        stream.assert_called_once()
+        self.assertIs(stream.call_args.args[0], self.started())
+        self.assertIsNone(stream.call_args.args[1])  # every step
+        self.assertIn("Ctrl-C returns to the prompt", out)
+
+    def test_following_can_be_turned_off(self):
+        self.session.settings["follow"] = False
+        with mock.patch.object(commands.logview, "stream") as stream:
+            self.do("add rate limiting")
+        stream.assert_not_called()
+
+    def test_leaving_the_log_does_not_replay_it_as_a_notice(self):
+        self.session.settings["follow"] = True
+        with mock.patch.object(commands.logview, "stream"):
+            self.do("add rate limiting")
+        wf = self.started()
+        wf.status = Status.EXECUTING
+        # Seeded again on the way out, so only changes from here are announced.
+        self.assertEqual(len(self.session.notices.drain([wf])), 1)
 
     def test_the_new_run_is_seeded_so_it_is_not_announced_late(self):
         self.do("add rate limiting")
