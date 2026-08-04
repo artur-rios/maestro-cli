@@ -6,7 +6,14 @@ then runs the whole thing on a branch in the background. The same CLI can fill
 all three roles.
 
 ```bash
+pip install -r requirements.txt
 python orchestrator.py
+```
+
+Or install it and get the `orchestrator` / `aiorch` commands:
+
+```bash
+pip install -e .
 ```
 
 ```
@@ -47,9 +54,32 @@ prompt when it moves on:
 ```
 
 `/set follow off` starts runs quietly instead, and `/logs <id>` or
-`/watch <id>` picks any run back up later.
+`/watch <id>` picks any run back up later. `/progress <id>` shows a live bar
+over the checklist rather than the agents' output.
 
-No dependencies beyond Python 3.10+ and `git`.
+## Two ways in
+
+The same capabilities are reachable from a script as from the shell, because
+both go through one grammar and one set of handlers:
+
+```bash
+orchestrator                                  # the interactive shell
+orchestrator new "add rate limiting" --mode auto -y
+orchestrator runs
+orchestrator watch 7f2a1c --progress
+orchestrator approve 7f2a1c
+orchestrator --help
+```
+
+Subcommands mirror the slash commands one for one, take the same flags, and
+exit non-zero on failure so they compose in scripts.
+
+## Requirements
+
+Python 3.10+, `git`, and three libraries: `click` for the command structure,
+`rich` for the output, and `questionary` for the prompts. A terminal is not
+required -- with piped input every prompt falls back to plain reads, so the
+tool stays scriptable.
 
 ## Commands
 
@@ -460,6 +490,7 @@ launch — its thread died with the process — but its branch and logs are kept
 ```
 orchestrator.py            entry point
 agent_orchestrator/
+  cli.py                   click command group; bare invocation opens the shell
   models.py                workflows, steps, tasks, statuses
   config.py                paths and backend definitions
   settings.py              your defaults for new runs
@@ -472,16 +503,23 @@ agent_orchestrator/
     repl.py                the prompt loop, banner, notices
     parser.py              a typed line -> an intent (pure, no I/O)
     commands.py            the command table and handlers
+    prompts.py             questionary prompts, with plain fallbacks
     promptlib.py           finding and loading saved prompts
     logview.py             streaming and following step logs
-    render.py              colours, tables, run detail
+    progress.py            the live progress view
+    render.py              rich console, tables, panels, messages
 tests/
 ```
 
-The `shell` package is the only place that reads or prints; `runner.py` is the
-only one that mutates workflow state. `parser.py` has no I/O at all, which is
-what makes the fiddliest part -- telling a task from a command, and a flag from
-prose -- cheap to test.
+`render.py` is the only place that styles anything, and `shell/prompts.py` the
+only place that reads input; `runner.py` remains the only module that mutates
+workflow state. `parser.py` has no I/O at all, which is what keeps the
+fiddliest part -- telling a task from a command, and a flag from prose --
+cheap to test.
+
+The interface rewrite did not touch the engine: `runner`, `gitops`, `backends`,
+`store`, `models` and `config` are unchanged, and their tests still pass
+unmodified.
 
 ## Tests
 
@@ -489,6 +527,6 @@ prose -- cheap to test.
 python -m unittest discover -s tests -t .
 ```
 
-353 tests. The unit tests fake git and the CLIs; the integration tests drive a
+408 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.

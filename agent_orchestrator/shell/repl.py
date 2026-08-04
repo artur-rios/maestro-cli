@@ -8,6 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import sys
+
+from rich.text import Text
+
 from .. import __version__, backends, settings as settings_mod
 from ..models import Status, Workflow
 from ..runner import Runner
@@ -16,9 +20,7 @@ from . import commands, promptlib, render
 from .commands import CommandError
 from .parser import Command, ParseError, TaskIntent, parse
 from .promptlib import PromptError
-from .render import BOLD, CYAN, GREEN, GREY, RED, RESET, YELLOW, colored
-
-PROMPT = f"{BOLD}>{RESET} "
+from .prompts import Asker
 
 
 class Notices:
@@ -43,8 +45,8 @@ class Notices:
     def forget(self, workflow_id: str) -> None:
         self._seen.pop(workflow_id, None)
 
-    def drain(self, workflows: list[Workflow]) -> list[str]:
-        lines: list[str] = []
+    def drain(self, workflows: list[Workflow]) -> list[Text]:
+        lines: list[Text] = []
         for wf in workflows:
             state = self._state(wf)
             previous = self._seen.get(wf.id)
@@ -52,25 +54,31 @@ class Notices:
             if previous is None or previous == state:
                 continue
             lines.append(self._describe(wf, previous, state))
-        return [line for line in lines if line]
+        return lines
 
-    def _describe(self, wf, previous: tuple[str, str], state: tuple[str, str]) -> str:
-        tag = f"{GREY}[{wf.id[:6]}]{RESET}"
+    def _describe(self, wf, previous: tuple[str, str], state: tuple[str, str]) -> Text:
+        line = Text("  ")
+        line.append(f"[{wf.id[:6]}]", style="id")
+        line.append(" ")
         status, progress = state
 
         if progress and progress != previous[1] and status == previous[0]:
-            return f"{tag} {progress} tasks done"
+            return line.append(f"{progress} tasks done")
         if wf.status is Status.AWAITING_APPROVAL:
-            return f"{tag} {colored('awaiting approval', YELLOW)} - /approve {wf.id[:6]}"
+            line.append("awaiting approval", style="warning")
+            return line.append(f" - /approve {wf.id[:6]}", style="muted")
         if wf.status is Status.MERGED:
-            return f"{tag} {colored('merged', GREEN)} into {wf.base_branch}"
+            line.append("merged", style="success")
+            return line.append(f" into {wf.base_branch}", style="muted")
         if wf.status is Status.FAILED:
-            return f"{tag} {colored('failed', RED)} - /show {wf.id[:6]}"
+            line.append("failed", style="error")
+            return line.append(f" - /show {wf.id[:6]}", style="muted")
         if wf.status is Status.CHANGES_REQUESTED:
-            return f"{tag} {colored('changes requested', YELLOW)} - /show {wf.id[:6]}"
+            line.append("changes requested", style="warning")
+            return line.append(f" - /show {wf.id[:6]}", style="muted")
         if wf.status is Status.CANCELLED:
-            return f"{tag} cancelled"
-        return f"{tag} {render.status_label(wf.status)}"
+            return line.append("cancelled", style="muted")
+        return line.append_text(render.status_text(wf.status))
 
 
 class Session:
@@ -82,6 +90,7 @@ class Session:
         self.runner = Runner(self.store)
         self.settings = settings_mod.load()
         self.notices = Notices()
+        self.asker = Asker()
         self._prompt_files: list[promptlib.PromptFile] | None = None
 
     def default_backend(self) -> str:
@@ -98,27 +107,27 @@ class Session:
 
     def ask_line(self, label: str, default: str = "") -> str:
         """Read one value, showing the default. Enter keeps it."""
-        suffix = f" {GREY}[{default}]{RESET}" if default else ""
-        try:
-            answer = input(f"  {label}{suffix}: ").strip()
-        except EOFError:
-            return default
-        return answer or default
+        return self.asker.line(label, default)
 
-    def ask_confirm(self, prompt: str = "  Enter to run, n to cancel: ",
-                    require: str = "") -> bool:
+    def ask_select(self, label: str, options: list[str], default: str = "") -> str:
+        """Pick one of `options`, or type it when there is no terminal."""
+        return self.asker.select(label, options, default)
+
+    def ask_confirm(self, message: str = "Run it?", require: str = "") -> bool:
         """True when the user wants to go ahead.
 
-        With `require` set, only that letter proceeds; otherwise a bare Enter
-        is enough and anything else backs out.
+        `require` marks the cautious prompts -- deletions and the like -- where
+        the default is no rather than yes.
         """
-        try:
-            answer = input(prompt).strip().lower()
-        except EOFError:
-            return False
-        if require:
-            return answer.startswith(require)
-        return answer in {"", "y", "yes"}
+        return self.asker.confirm(message, default=not require)
+
+    def ask_action(self, label: str, options: list[tuple[str, str]], default: str) -> str:
+        """Choose between a few named actions, e.g. run / change / cancel."""
+        labels = [text for _, text in options]
+        by_label = {text: key for key, text in options}
+        wanted = next((t for k, t in options if k == default), labels[0])
+        chosen = self.asker.select(label, labels, wanted)
+        return by_label.get(chosen, default)
 
 
 class Shell:
@@ -129,53 +138,59 @@ class Shell:
 
     def greet(self) -> None:
         session = self.session
-        print()
-        for line in render.banner(render.width(), __version__):
-            print(line)
+        render.out()
+        for part in render.banner(render.width(), __version__):
+            render.out(part)
 
-        installed = backends.available()
-        names = "  ".join(
-            colored(name, GREEN) if ok else colored(name, RED)
-            for name, ok in installed
-        )
+        status = Text("  ")
+        for index, (name, ok) in enumerate(backends.available()):
+            if index:
+                status.append("  ")
+            status.append(name, style="success" if ok else "error")
         repo = session.settings.get("repo") or str(session.cwd)
-        print()
-        print(f"  {names}   {GREY}repo {Path(repo).name}{RESET}")
+        status.append(f"   repo {Path(repo).name}", style="muted")
+        render.out()
+        render.out(status)
 
         runs = session.store.all()
         waiting = sum(1 for w in runs if w.status is Status.AWAITING_APPROVAL)
-        bits = [render.plural(len(runs), "run")] if runs else []
+        line = Text("  ")
+        if runs:
+            line.append(render.plural(len(runs), "run"))
+            line.append("  ")
         if waiting:
-            bits.append(colored(f"{waiting} awaiting approval", YELLOW))
-        bits.append(f"{GREY}/help for commands{RESET}")
-        print(f"  {'  '.join(bits)}")
+            line.append(f"{waiting} awaiting approval", style="warning")
+            line.append("  ")
+        line.append("/help for commands", style="muted")
+        render.out(line)
 
         orphans = session.runner.adopt_orphans()
         if orphans:
-            print()
-            print(colored(
-                f"  {render.plural(orphans, 'run')} interrupted when the "
-                f"orchestrator last exited - /resume to continue", YELLOW))
+            render.out()
+            render.warn(
+                f"{render.plural(orphans, 'run')} interrupted when the "
+                f"orchestrator last exited - /resume to continue"
+            )
         for wf in session.store.all():
             session.notices.seed(wf)
-        print()
+        render.out()
 
     # ------------------------------------------------------------------- loop
 
     def run(self) -> int:
-        render.init_console()
         self.greet()
 
         while True:
             for line in self.session.notices.drain(self.session.store.all()):
-                print(line)
+                render.out(line)
             try:
-                raw = input(PROMPT)
+                raw = self.session.asker.command()
             except KeyboardInterrupt:
-                print()
+                render.out()
                 continue
             except EOFError:
-                print(f"\n{GREY}  bye{RESET}")
+                render.out()
+                render.muted("bye")
                 return 0
 
             if not self.handle(raw):
@@ -186,7 +201,7 @@ class Shell:
         try:
             intent = parse(raw)
         except ParseError as exc:
-            print(colored(f"  {exc}", RED))
+            render.error(str(exc))
             return True
 
         if intent is None:
@@ -199,18 +214,20 @@ class Shell:
             try:
                 commands.dispatch(self.session, intent)
             except (CommandError, PromptError) as exc:
-                print(colored(f"  {exc}", RED))
+                render.error(str(exc))
             except KeyboardInterrupt:
-                print(colored("\n  cancelled", YELLOW))
+                render.out()
+                render.warn("cancelled")
             return True
 
         assert isinstance(intent, TaskIntent)
         try:
             commands.start_task(self.session, intent)
         except (CommandError, PromptError) as exc:
-            print(colored(f"  {exc}", RED))
+            render.error(str(exc))
         except KeyboardInterrupt:
-            print(colored("\n  cancelled", YELLOW))
+            render.out()
+            render.warn("cancelled")
         return True
 
     def quit(self) -> int:
@@ -219,12 +236,13 @@ class Shell:
             if self.session.runner.is_running(w.id)
         ]
         if running:
-            print(colored(
-                f"  {render.plural(len(running), 'run')} still going - they stop "
-                f"when this exits, and can be resumed later", YELLOW))
-            if not self.session.ask_confirm("  Enter to exit, n to stay: "):
+            render.warn(
+                f"{render.plural(len(running), 'run')} still going - they stop "
+                f"when this exits, and can be resumed later"
+            )
+            if not self.session.ask_confirm("Exit anyway?"):
                 return -1
-        print(f"{GREY}  bye{RESET}")
+        render.muted("bye")
         return 0
 
 

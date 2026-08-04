@@ -42,7 +42,19 @@ class ShellTestCase(unittest.TestCase):
             self.asked.append((label, default))
             return self.lines.pop(0) if self.lines else default
 
+        def ask_select(label, options, default=""):
+            self.asked.append((label, default))
+            answer = self.lines.pop(0) if self.lines else default
+            return answer or default
+
+        def ask_action(label, options, default):
+            self.asked.append((label, default))
+            return self.lines.pop(0) if self.lines else default
+
         self.session.ask_line = ask_line
+        self.session.ask_select = ask_select
+        self.session.ask_action = ask_action
+        self.session.asker.force_plain = True
         # Following is exercised by its own tests; elsewhere it is noise.
         self.session.settings["follow"] = False
 
@@ -397,7 +409,7 @@ class StartingRuns(ShellTestCase):
         self.assertIn("supervised", out)
 
     def test_declining_the_confirmation_starts_nothing(self):
-        self.lines = ["n"]
+        self.lines = ["cancel"]
         out = self.do("add rate limiting")
         self.session.runner.start.assert_not_called()
         self.assertIn("cancelled", out)
@@ -405,7 +417,7 @@ class StartingRuns(ShellTestCase):
 
     def test_confirmation_can_be_turned_off(self):
         self.session.settings["confirm"] = False
-        self.session.ask_line = mock.Mock(side_effect=AssertionError("asked!"))
+        self.session.ask_action = mock.Mock(side_effect=AssertionError("asked!"))
         self.do("add rate limiting")
         self.started()
 
@@ -491,28 +503,28 @@ class StartingRuns(ShellTestCase):
     def test_choosing_to_change_walks_through_every_setting(self):
         # c, then Enter for each field (the queue runs out and defaults apply),
         # then Enter at the final confirm.
-        self.lines = ["c"]
+        self.lines = ["change"]
         self.do("add rate limiting")
         asked = [label for label, _ in self.asked]
         for expected in ("plan agent", "plan model", "execute agent", "execute model",
                          "review agent", "review model",
-                         "mode (supervised/autonomous)", "rework rounds",
+                         "mode", "rework rounds",
                          "attempts per step", "branch"):
             self.assertIn(expected, asked)
 
     def test_every_field_offers_the_current_value_as_the_default(self):
-        self.lines = ["c"]
+        self.lines = ["change"]
         self.do("add rate limiting")
         defaults = dict(self.asked)
         self.assertEqual(defaults["plan agent"], "claude")
         self.assertEqual(defaults["execute agent"], "opencode")
         self.assertEqual(defaults["review agent"], "codex")
-        self.assertEqual(defaults["mode (supervised/autonomous)"], "supervised")
+        self.assertEqual(defaults["mode"], "supervised")
         self.assertEqual(defaults["rework rounds"], "2")
         self.assertEqual(defaults["attempts per step"], "3")
 
     def test_pressing_enter_through_the_edit_keeps_the_defaults(self):
-        self.lines = ["c"]
+        self.lines = ["change"]
         self.do("add rate limiting")
         wf = self.started()
         self.assertEqual(wf.agents, {"plan": "claude", "execute": "opencode",
@@ -522,11 +534,11 @@ class StartingRuns(ShellTestCase):
 
     def test_typed_values_are_used(self):
         self.lines = [
-            "c",
+            "change",
             "codex", "",        # plan agent, plan model
             "claude", "",       # execute
             "opencode", "",     # review
-            "auto", "4", "6", "fix/my-branch",
+            "autonomous", "4", "6", "fix/my-branch",
         ]
         self.do("add rate limiting")
         wf = self.started()
@@ -538,25 +550,25 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(wf.branch, "fix/my-branch")
 
     def test_a_bad_value_is_asked_again(self):
-        self.lines = ["c", "claude", "", "opencode", "", "codex", "", "sideways", "auto"]
+        self.lines = ["change", "claude", "", "opencode", "", "codex", "", "autonomous"]
         out = self.do("add rate limiting")
         self.assertIn("supervised", out)  # the complaint
         self.assertIs(self.started().mode, Mode.AUTONOMOUS)
 
     def test_an_unknown_agent_is_asked_again(self):
-        self.lines = ["c", "nosuchcli", "claude"]
+        self.lines = ["change", "nosuchcli", "claude"]
         out = self.do("add rate limiting")
         self.assertIn("unknown backend", out)
         self.assertEqual(self.started().agents["plan"], "claude")
 
     def test_a_zero_round_count_is_asked_again(self):
-        self.lines = ["c", "claude", "", "opencode", "", "codex", "", "supervised", "0", "2"]
+        self.lines = ["change", "claude", "", "opencode", "", "codex", "", "supervised", "0", "2"]
         out = self.do("add rate limiting")
         self.assertIn("1 or more", out)
         self.assertEqual(self.started().max_rounds, 2)
 
     def test_edits_can_be_saved_as_the_new_defaults(self):
-        self.lines = ["c", "codex", "", "codex", "", "codex", "", "auto", "5", "7"]
+        self.lines = ["change", "codex", "", "codex", "", "codex", "", "autonomous", "5", "7"]
         self.confirm = True  # yes to "save these as your defaults?"
         self.do("add rate limiting")
 
@@ -567,7 +579,7 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(saved["attempts"], 7)
 
     def test_edits_are_not_saved_unless_asked(self):
-        self.lines = ["c", "codex", "", "codex", "", "codex", "", "auto", "5", "7"]
+        self.lines = ["change", "codex", "", "codex", "", "codex", "", "autonomous", "5", "7"]
         self.confirm = False  # no to saving
         self.do("add rate limiting")
 
@@ -578,13 +590,13 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(self.started().max_rounds, 5)
 
     def test_an_unrecognised_answer_reprompts_rather_than_running(self):
-        self.lines = ["what?", ""]
+        self.lines = ["what?", "run"]
         out = self.do("add rate limiting")
-        self.assertIn("Enter to run", out)
+        self.assertIn("choose run, change or cancel", out)
         self.started()  # the second answer ran it
 
     def test_a_model_is_offered_for_every_role(self):
-        self.lines = ["c"]
+        self.lines = ["change"]
         self.do("add rate limiting")
         asked = [label for label, _ in self.asked]
         self.assertIn("plan model", asked)
@@ -593,7 +605,7 @@ class StartingRuns(ShellTestCase):
 
     def test_a_chosen_model_reaches_the_workflow(self):
         self.lines = [
-            "c",
+            "change",
             "claude", "opus-4.6",
             "opencode", "opencode-go/glm-5.2",
             "codex", "",
@@ -605,7 +617,7 @@ class StartingRuns(ShellTestCase):
         self.assertNotIn("review", wf.models)  # blank means the CLI's default
 
     def test_a_blank_model_leaves_the_backend_alone(self):
-        self.lines = ["c"]
+        self.lines = ["change"]
         self.do("add rate limiting")
         self.assertEqual(self.started().models, {})
 
@@ -625,8 +637,8 @@ class StartingRuns(ShellTestCase):
 
     def test_models_are_shown_in_the_summary(self):
         out = self.do("add rate limiting --model sonnet-4.6")
-        self.assertIn("models:", out)
         self.assertIn("sonnet-4.6", out)
+        self.assertIn("plan sonnet-4.6", " ".join(out.split()))
 
     def test_a_model_default_can_be_set_and_is_used(self):
         self.session.settings["execute_model"] = "opencode-go/glm-5.2"
@@ -634,7 +646,7 @@ class StartingRuns(ShellTestCase):
         self.assertEqual(self.started().models["execute"], "opencode-go/glm-5.2")
 
     def test_models_are_saved_with_the_other_defaults(self):
-        self.lines = ["c", "claude", "opus-4.6", "opencode", "", "codex", ""]
+        self.lines = ["change", "claude", "opus-4.6", "opencode", "", "codex", ""]
         self.confirm = True
         self.do("add rate limiting")
         self.assertEqual(settings_mod.load()["plan_model"], "opus-4.6")
@@ -696,7 +708,7 @@ class Notices(unittest.TestCase):
         wf = self.make(Status.EXECUTING)
         board.seed(wf)
         wf.status = Status.MERGED
-        lines = ANSI.sub("", " ".join(board.drain([wf])))
+        lines = " ".join(t.plain for t in board.drain([wf]))
         self.assertIn("merged", lines)
         self.assertIn(wf.id[:6], lines)
 
@@ -705,7 +717,7 @@ class Notices(unittest.TestCase):
         wf = self.make(Status.EXECUTING, tasks=[Task(1, "a"), Task(2, "b")])
         board.seed(wf)
         wf.tasks[0].status = Status.DONE
-        lines = ANSI.sub("", " ".join(board.drain([wf])))
+        lines = " ".join(t.plain for t in board.drain([wf]))
         self.assertIn("1/2 tasks done", lines)
 
     def test_awaiting_approval_points_at_the_command(self):
@@ -713,7 +725,7 @@ class Notices(unittest.TestCase):
         wf = self.make(Status.REVIEWING)
         board.seed(wf)
         wf.status = Status.AWAITING_APPROVAL
-        lines = ANSI.sub("", " ".join(board.drain([wf])))
+        lines = " ".join(t.plain for t in board.drain([wf]))
         self.assertIn("awaiting approval", lines)
         self.assertIn("/approve", lines)
 

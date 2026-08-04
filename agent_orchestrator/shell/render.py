@@ -1,41 +1,50 @@
 """Everything the shell draws.
 
-Formatting only: these functions return or print text and never decide
-anything, so the command handlers stay about behaviour.
+Presentation only: these helpers render text and never decide anything, so the
+command handlers stay about behaviour. Output goes through a single rich
+Console so styling, wrapping and terminal detection are handled in one place.
 """
 
 from __future__ import annotations
 
-import os
-import shutil
-import sys
 import time
+
+from rich.box import ROUNDED, SIMPLE
+from rich.console import Console, Group, RenderableType
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+from rich.theme import Theme
 
 from ..models import Status, Step, Workflow
 
-RESET = "\033[0m"
-BOLD = "\033[1m"
-CYAN = "\033[36m"
-GREEN = "\033[32m"
-YELLOW = "\033[33m"
-RED = "\033[31m"
-BLUE = "\033[34m"
-GREY = "\033[90m"
+THEME = Theme(
+    {
+        "success": "bold green",
+        "warning": "yellow",
+        "error": "bold red",
+        "info": "cyan",
+        "muted": "dim",
+        "accent": "red",
+        "heading": "bold",
+        "id": "bright_black",
+        # One entry per status, so a status is coloured the same everywhere.
+        "s.pending": "dim",
+        "s.planning": "cyan",
+        "s.executing": "cyan",
+        "s.reviewing": "cyan",
+        "s.merging": "cyan",
+        "s.awaiting_approval": "yellow",
+        "s.merged": "green",
+        "s.changes_requested": "yellow",
+        "s.failed": "red",
+        "s.cancelled": "dim",
+        "s.running": "cyan",
+        "s.done": "green",
+    }
+)
 
-STATUS_COLOR = {
-    Status.PENDING: GREY,
-    Status.PLANNING: CYAN,
-    Status.EXECUTING: CYAN,
-    Status.REVIEWING: CYAN,
-    Status.MERGING: CYAN,
-    Status.AWAITING_APPROVAL: YELLOW,
-    Status.MERGED: GREEN,
-    Status.CHANGES_REQUESTED: YELLOW,
-    Status.FAILED: RED,
-    Status.CANCELLED: GREY,
-    Status.RUNNING: CYAN,
-    Status.DONE: GREEN,
-}
+console = Console(theme=THEME, highlight=False, soft_wrap=False)
 
 #: Pure ASCII: a console on a legacy code page cannot render box drawing, and
 #: this is the first thing printed.
@@ -48,53 +57,27 @@ WORDMARK = (
 )
 WORDMARK_WIDTH = max(len(line) for line in WORDMARK)
 
-#: A red gradient, light at the top. 256-colour codes are the same escape
-#: family as the rest of the palette, and VT processing is already enabled.
-_SHADES = (
-    "\033[38;5;210m",
-    "\033[38;5;203m",
-    "\033[38;5;196m",
-    "\033[38;5;160m",
-    "\033[38;5;124m",
-)
+#: A red gradient, light at the top.
+_SHADES = ("color(210)", "color(203)", "color(196)", "color(160)", "color(124)")
 
 
-def init_console() -> None:
-    """Make the console safe to print to before anything is written."""
-    try:
-        sys.stdout.reconfigure(errors="replace")
-    except (AttributeError, OSError):
-        pass
-    if os.name != "nt":
-        return
-    try:
-        import ctypes
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
-    except Exception:  # noqa: BLE001 - colour is cosmetic
-        pass
+# ---------------------------------------------------------------- primitives
 
 
 def width() -> int:
-    return shutil.get_terminal_size(fallback=(80, 24)).columns
+    return console.size.width
 
 
-def colored(text: str, color: str) -> str:
-    return f"{color}{text}{RESET}"
+def status_style(status: Status) -> str:
+    return f"s.{status.value}"
+
+
+def status_text(status: Status) -> Text:
+    return Text(status.value, style=status_style(status))
 
 
 def plural(count: int, noun: str) -> str:
     return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
-
-
-def status_label(status: Status) -> str:
-    return colored(status.value, STATUS_COLOR.get(status, ""))
-
-
-def status_column(status: Status, size: int) -> str:
-    """Colour codes have no display width, so pad against the plain text."""
-    return status_label(status) + " " * max(1, size - len(status.value))
 
 
 def elapsed(seconds: float | None) -> str:
@@ -112,117 +95,324 @@ def indent(text: str, prefix: str = "    ") -> str:
     return "\n".join(prefix + line for line in text.splitlines())
 
 
-def banner(term_width: int, version: str = "") -> list[str]:
+# ------------------------------------------------------------------ messages
+
+
+def out(renderable: RenderableType = "") -> None:
+    console.print(renderable)
+
+
+def success(message: str) -> None:
+    console.print(f"  [success]{message}[/]")
+
+
+def warn(message: str) -> None:
+    console.print(f"  [warning]{message}[/]")
+
+
+def error(message: str) -> None:
+    """A failure the user needs to act on, with the cause spelled out."""
+    console.print(f"  [error]x[/] {message}", style="red")
+
+
+def info(message: str) -> None:
+    console.print(f"  [info]{message}[/]")
+
+
+def muted(message: str) -> None:
+    console.print(f"  [muted]{message}[/]")
+
+
+def hint(message: str) -> None:
+    """A nudge towards the command that would help."""
+    console.print(f"  [muted]-> {message}[/]")
+
+
+def field(label: str, value: RenderableType, label_width: int = 8) -> None:
+    line = Text("  ")
+    line.append(f"{label:<{label_width}}", style="muted")
+    line.append_text(value if isinstance(value, Text) else Text(str(value)))
+    console.print(line)
+
+
+# -------------------------------------------------------------------- banner
+
+
+def banner(term_width: int | None = None, version: str = "") -> list[RenderableType]:
     """The wordmark, or a plain title when the terminal is too narrow."""
-    title = "AI AGENT ORCHESTRATOR"
-    stamp = f"  {GREY}v{version}{RESET}" if version else ""
+    term_width = term_width if term_width is not None else width()
+    title = Text("AI AGENT ORCHESTRATOR", style="heading")
+    if version:
+        title.append(f"  v{version}", style="muted")
+
     if term_width < WORDMARK_WIDTH + 2:
-        return [f"{BOLD}{CYAN}{title}{RESET}{stamp}"]
-    lines = [f"{shade}{art}{RESET}" for shade, art in zip(_SHADES, WORDMARK)]
-    lines.append("")
-    lines.append(f"  {BOLD}{title}{RESET}{stamp}")
-    return lines
+        return [Text("AI AGENT ORCHESTRATOR", style="bold accent"), Text()]
+
+    art = Text()
+    for shade, line in zip(_SHADES, WORDMARK):
+        art.append(line + "\n", style=shade)
+    return [art, title]
 
 
-def run_table(
-    workflows: list[Workflow], is_running, now: float | None = None
-) -> list[str]:
-    """One line per run, newest first."""
+# --------------------------------------------------------------------- runs
+
+
+def run_table(workflows: list[Workflow], is_running, now: float | None = None) -> RenderableType:
+    """One row per run, newest first."""
     if not workflows:
-        return [f"{GREY}  no runs yet - type a task to start one{RESET}"]
+        return Text("  no runs yet - type a task to start one", style="muted")
 
     moment = now or time.time()
-    lines = [
-        f"  {BOLD}{'ID':<8}{'STATUS':<20}{'DONE':<6}{'AGE':<8}TASK{RESET}"
-    ]
+    table = Table(box=SIMPLE, pad_edge=False, expand=False, header_style="heading")
+    table.add_column("ID", style="id", no_wrap=True)
+    table.add_column("STATUS", no_wrap=True)
+    table.add_column("DONE", justify="right", no_wrap=True)
+    table.add_column("AGE", justify="right", no_wrap=True)
+    table.add_column("TASK", overflow="ellipsis", max_width=52)
+
     for wf in workflows:
-        live = colored(" *", CYAN) if is_running(wf.id) else ""
-        progress = wf.task_progress or f"{wf.round}/{wf.max_rounds}"
-        lines.append(
-            f"  {wf.id[:6]:<8}{status_column(wf.status, 20)}{progress:<6}"
-            f"{elapsed(moment - wf.created_at):<8}{wf.summary}{live}"
+        marker = Text(" *", style="info") if is_running(wf.id) else Text("")
+        task = Text(wf.summary)
+        task.append_text(marker)
+        table.add_row(
+            wf.id[:6],
+            status_text(wf.status),
+            wf.task_progress or f"{wf.round}/{wf.max_rounds}",
+            elapsed(moment - wf.created_at),
+            task,
         )
-    return lines
+    return table
 
 
-def run_detail(wf: Workflow, is_running) -> list[str]:
+def run_detail(wf: Workflow, is_running) -> list[RenderableType]:
     """The full account of one run."""
-    out = [
-        f"  {BOLD}{wf.id}{RESET}  {status_label(wf.status)}"
-        + (colored("  running", CYAN) if is_running(wf.id) else ""),
-        f"  {GREY}branch  {RESET}{wf.branch or '-'}  {GREY}base {wf.base_branch}{RESET}",
-        f"  {GREY}repo    {RESET}{wf.repo_path}",
-        f"  {GREY}agents  {RESET}{wf.agents.get('plan')} -> "
-        f"{wf.agents.get('execute')} -> {wf.agents.get('review')}"
-        + (
-            f"  {GREY}({', '.join(f'{r} {m}' for r, m in wf.models.items() if m)}){RESET}"
-            if any(wf.models.values()) else ""
-        ),
-        f"  {GREY}mode    {RESET}{wf.mode.value}   round {wf.round}/{wf.max_rounds}"
-        f"   {wf.max_attempts} attempts/step",
-    ]
-    if wf.prompt_source:
-        out.append(f"  {GREY}source  {RESET}{wf.prompt_source}")
-    if wf.verdict:
-        color = GREEN if wf.verdict.value == "APPROVE" else YELLOW
-        out.append(f"  {GREY}verdict {RESET}{colored(wf.verdict.value, color)}")
-    if wf.message:
-        color = RED if wf.status is Status.FAILED else GREY
-        out.append(f"  {GREY}note    {RESET}{colored(wf.message, color)}")
-    for note in wf.notes:
-        out.append(f"  {GREY}warning {RESET}{colored(note, YELLOW)}")
+    header = Text()
+    header.append(wf.id[:6], style="heading")
+    header.append("  ")
+    header.append_text(status_text(wf.status))
+    if is_running(wf.id):
+        header.append("  running", style="info")
 
-    out.append("")
-    out.append(f"  {BOLD}Task{RESET}")
-    out.append(indent(wf.prompt))
+    facts = Table.grid(padding=(0, 2))
+    facts.add_column(style="muted", no_wrap=True)
+    facts.add_column()
+    facts.add_row("branch", f"{wf.branch or '-'}  [muted]base {wf.base_branch}[/]")
+    facts.add_row("repo", wf.repo_path)
+
+    agents = (
+        f"{wf.agents.get('plan')} -> {wf.agents.get('execute')}"
+        f" -> {wf.agents.get('review')}"
+    )
+    chosen = ", ".join(f"{r} {m}" for r, m in wf.models.items() if m)
+    if chosen:
+        agents += f"  [muted]({chosen})[/]"
+    facts.add_row("agents", agents)
+    facts.add_row(
+        "mode",
+        f"{wf.mode.value}   round {wf.round}/{wf.max_rounds}"
+        f"   {wf.max_attempts} attempts/step",
+    )
+    if wf.prompt_source:
+        facts.add_row("source", wf.prompt_source)
+    if wf.verdict:
+        style = "success" if wf.verdict.value == "APPROVE" else "warning"
+        facts.add_row("verdict", f"[{style}]{wf.verdict.value}[/]")
+    if wf.message:
+        style = "error" if wf.status is Status.FAILED else "muted"
+        facts.add_row("note", Text(wf.message, style=style))
+    for note in wf.notes:
+        facts.add_row("warning", Text(note, style="warning"))
+
+    parts: list[RenderableType] = [
+        header,
+        facts,
+        "",
+        Panel(Text(wf.prompt), title="task", title_align="left", box=ROUNDED,
+              border_style="muted", padding=(0, 1)),
+    ]
 
     if wf.tasks:
-        out.append("")
-        out.append(f"  {BOLD}Checklist{RESET}  {wf.task_progress} done")
-        for task in wf.tasks:
-            if task.status is Status.DONE:
-                mark, color = "[x]", GREEN
-            elif task.status is Status.FAILED:
-                mark, color = "[!]", RED
-            else:
-                mark, color = "[ ]", GREY
-            tries = f"  {GREY}({task.attempts} attempts){RESET}" if task.attempts > 1 else ""
-            out.append(f"  {colored(mark, color)} {task.index}. {task.text}{tries}")
-
+        parts.append(checklist(wf))
     if wf.steps:
-        out.append("")
-        out.append(f"  {BOLD}Steps{RESET}")
+        parts.append("")
+        parts.append(Text("steps", style="heading"))
+        steps = Table.grid(padding=(0, 1))
+        for column in range(6):
+            steps.add_column(no_wrap=(column < 5))
         for index, step in enumerate(wf.steps, start=1):
-            out.append(f"  {index:>2}. {step_line(step)}")
-    return out
+            steps.add_row(f" {index:>2}.", *step_cells(step))
+        parts.append(steps)
+    return parts
 
 
-def step_line(step: Step) -> str:
+def checklist(wf: Workflow) -> RenderableType:
+    """The plan's items with their marks, as a grid."""
+    grid = Table.grid(padding=(0, 1))
+    grid.add_column(no_wrap=True)
+    grid.add_column(no_wrap=True)
+    grid.add_column()
+
+    for task in wf.tasks:
+        if task.status is Status.DONE:
+            mark, style = "[x]", "success"
+        elif task.status is Status.FAILED:
+            mark, style = "[!]", "error"
+        else:
+            mark, style = "[ ]", "muted"
+        # Text(), not markup: "[x]" and any brackets in the task itself would
+        # otherwise be parsed as style tags and vanish.
+        body = Text(task.text)
+        if task.attempts > 1:
+            body.append(f"  ({task.attempts} attempts)", style="muted")
+        grid.add_row(Text(mark, style=style), Text(f"{task.index}."), body)
+
+    title = Text("checklist", style="heading")
+    title.append(f"  {wf.task_progress} done", style="muted")
+    return Group("", title, grid)
+
+
+def step_cells(step: Step) -> list[RenderableType]:
     scope = f"task {step.task_index}" if step.task_index else f"round {step.round}"
-    detail = f"  {RED}{step.error}{RESET}" if step.error else ""
-    return (
-        f"{step.role.value:<8} {step.agent:<10} {scope:<8} "
-        f"{status_column(step.status, 10)}{elapsed(step.duration):<7}{detail}"
-    )
+    return [
+        Text(step.role.value, style="info"),
+        Text(step.agent),
+        Text(scope, style="muted"),
+        status_text(step.status),
+        Text(elapsed(step.duration), style="muted"),
+        Text(step.error, style="error") if step.error else Text(""),
+    ]
 
 
-def summary_line(
+def backend_table(data: dict) -> RenderableType:
+    """Which CLIs are configured, whether they are installed, how they run."""
+    from .. import config as config_mod
+
+    table = Table(box=SIMPLE, pad_edge=False, header_style="heading")
+    table.add_column("BACKEND", no_wrap=True)
+    table.add_column("BINARY", style="muted", no_wrap=True)
+    table.add_column("STATE", no_wrap=True)
+    table.add_column("PLAN / REVIEW", style="muted", overflow="fold")
+    table.add_column("EXECUTE", style="muted", overflow="fold")
+
+    for name, backend in sorted(data.items()):
+        installed = config_mod.is_installed(backend)
+        table.add_row(
+            Text(name, style="heading"),
+            str(backend.get("bin", "")),
+            Text("installed", style="success") if installed
+            else Text("not found", style="error"),
+            " ".join(backend.get("args", [])),
+            " ".join(backend.get("execute_args") or backend.get("args", [])),
+        )
+    return table
+
+
+def option_table(name: str, kind: str, choices: list[tuple[str, str]]) -> RenderableType:
+    """The agents or models a backend reports."""
+    table = Table(box=SIMPLE, pad_edge=False, header_style="heading")
+    table.add_column(f"{name.upper()} {kind.upper()}S", no_wrap=True)
+    table.add_column("", style="muted", no_wrap=True)
+    for option, note in choices:
+        table.add_row(option, note)
+    return table
+
+
+def settings_table(settings: dict, editable) -> RenderableType:
+    """Current defaults for new runs."""
+    table = Table(box=SIMPLE, pad_edge=False, header_style="heading")
+    table.add_column("SETTING", no_wrap=True)
+    table.add_column("VALUE")
+    for key in editable:
+        value = settings.get(key)
+        shown = (
+            Text(str(value)) if value not in ("", None)
+            else Text("(auto)", style="muted")
+        )
+        table.add_row(key, shown)
+    return Group(table, Text("  change with /set <key> <value>", style="muted"))
+
+
+def roots_panel(roots: list[str]) -> RenderableType:
+    body = Text()
+    body.append("always: current directory, ./docs/prompts\n", style="muted")
+    for root in roots:
+        body.append(f"{root}\n")
+    body.append("add more with /prompts add <path>", style="muted")
+    return Panel(body, box=ROUNDED, border_style="muted", padding=(0, 1),
+                 title="prompt roots", title_align="left")
+
+
+def prompt_table(files) -> RenderableType:
+    """Saved prompts, grouped by the root they came from."""
+    table = Table(box=SIMPLE, pad_edge=False, header_style="heading")
+    table.add_column("REFERENCE", style="info", no_wrap=True)
+    table.add_column("FILE", style="muted", overflow="fold")
+    table.add_column("SOURCE", style="muted", no_wrap=True)
+    for item in files:
+        table.add_row(f"@{item.name}", item.label, item.source)
+    return table
+
+
+def help_table(entries) -> RenderableType:
+    """The command reference, blank entries acting as group breaks."""
+    table = Table.grid(padding=(0, 2))
+    table.add_column(style="info", no_wrap=True)
+    table.add_column(style="muted")
+    for left, right in entries:
+        table.add_row(left, right)
+    return Group("", table, "")
+
+
+def merge_preview(wf: Workflow, diffstat: str) -> RenderableType:
+    """What approving this run would land, and what the reviewer said."""
+    header = Text("  merge ")
+    header.append(wf.branch, style="heading")
+    header.append(" into ")
+    header.append(wf.base_branch, style="heading")
+
+    parts: list[RenderableType] = [
+        header,
+        Panel(Text(diffstat or "(no changes)"), box=ROUNDED,
+              border_style="muted", padding=(0, 1), title="diff",
+              title_align="left"),
+    ]
+    if wf.review_text:
+        parts.append(
+            Panel(Text(wf.review_text[-800:]), box=ROUNDED,
+                  border_style="muted", padding=(0, 1),
+                  title="reviewer said", title_align="left")
+        )
+    return Group(*parts)
+
+
+def summary_panel(
     branch: str,
     agents: dict[str, str],
     mode: str,
     rounds: int,
     attempts: int,
     models: dict[str, str] | None = None,
-) -> list[str]:
+    source: str = "",
+) -> RenderableType:
     """What a run is about to do, shown before it starts."""
-    lines = [
-        f"  {BOLD}{branch}{RESET}",
-        f"  {agents['plan']} -> {agents['execute']} -> {agents['review']}"
-        f"  {GREY}|{RESET}  {mode}"
-        f"  {GREY}|{RESET}  {plural(rounds, 'round')}, {attempts} attempts/step",
-    ]
+    body = Table.grid(padding=(0, 2))
+    body.add_column(style="muted", no_wrap=True)
+    body.add_column()
+
+    body.add_row("branch", f"[heading]{branch}[/]")
+    line = f"{agents['plan']} -> {agents['execute']} -> {agents['review']}"
     chosen = {role: name for role, name in (models or {}).items() if name}
     if chosen:
-        parts = ", ".join(f"{role} {name}" for role, name in chosen.items())
-        lines.append(f"  {GREY}models: {parts}{RESET}")
-    return lines
+        line += "  [muted](" + ", ".join(
+            f"{role} {name}" for role, name in chosen.items()
+        ) + ")[/]"
+    body.add_row("agents", line)
+    body.add_row(
+        "run",
+        f"{mode}  [muted]|[/]  {plural(rounds, 'round')}, {attempts} attempts/step",
+    )
+    if source:
+        body.add_row("from", f"[muted]{source}[/]")
+
+    return Panel(body, box=ROUNDED, border_style="accent", padding=(0, 1),
+                 title="about to run", title_align="left")

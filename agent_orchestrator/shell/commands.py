@@ -12,10 +12,10 @@ from pathlib import Path
 from .. import backends, config, gitops, settings as settings_mod, store as store_mod
 from ..gitops import GitError
 from ..models import Mode, Role, Status, Workflow
-from . import logview, promptlib, render
+from . import logview, progress, promptlib, render
 from .parser import Command, TaskIntent
 from .promptlib import PromptError
-from .render import BOLD, CYAN, GREEN, GREY, RED, RESET, YELLOW, colored
+from .render import console
 
 
 class CommandError(Exception):
@@ -91,11 +91,9 @@ def start_task(session, intent: TaskIntent) -> None:
 
     plan = _defaulted_run(session, prompt, overrides, repo)
 
-    if source:
-        print(f"  {GREY}from {source}{RESET}")
-    plan = _confirm_or_edit(session, plan, repo)
+    plan = _confirm_or_edit(session, plan, repo, source)
     if plan is None:
-        print(f"  {GREY}cancelled{RESET}")
+        render.muted("cancelled")
         return
 
     workflow = Workflow(
@@ -113,10 +111,11 @@ def start_task(session, intent: TaskIntent) -> None:
     session.store.add(workflow)
     session.notices.seed(workflow)
     session.runner.start(workflow)
-    print(colored(f"  started {workflow.id[:6]}", GREEN))
+    render.success(f"started {workflow.id[:6]}")
 
     if session.settings.get("follow", True):
-        print(f"  {GREY}following - Ctrl-C returns to the prompt{RESET}\n")
+        render.muted("following - Ctrl-C returns to the prompt")
+        render.out()
         logview.stream(workflow, None, session.runner.is_running)
         # Whatever happened while following is now old news.
         session.notices.seed(workflow)
@@ -153,37 +152,43 @@ def _defaulted_run(session, prompt: str, overrides: dict, repo) -> dict:
     }
 
 
-def _confirm_or_edit(session, plan: dict, repo) -> dict | None:
+def _confirm_or_edit(session, plan: dict, repo, source: str = "") -> dict | None:
     """Show what will happen; let it be changed. None means cancel."""
     while True:
-        for line in render.summary_line(
+        render.out(render.summary_panel(
             plan["branch"], plan["agents"], plan["mode"],
-            plan["rounds"], plan["attempts"], plan.get("models"),
-        ):
-            print(line)
+            plan["rounds"], plan["attempts"], plan.get("models"), source,
+        ))
 
         if not session.settings.get("confirm", True):
             return plan
 
-        answer = session.ask_line(
-            f"{GREY}Enter to run, c to change, n to cancel{RESET}"
+        answer = session.ask_action(
+            "Start this run?",
+            [
+                ("run", "run it"),
+                ("change", "change the settings first"),
+                ("cancel", "cancel"),
+            ],
+            default="run",
         ).strip().lower()
-        if answer in {"", "y", "yes", "r", "run"}:
+        if answer in {"", "run", "y", "yes", "r"}:
             return plan
-        if answer in {"n", "no", "q", "cancel"}:
+        if answer in {"cancel", "n", "no", "q"}:
             return None
-        if answer in {"c", "change", "e", "edit"}:
+        if answer in {"change", "c", "e", "edit"}:
             plan = _edit_run(session, plan, repo)
             continue
-        print(colored("  type Enter to run, c to change, or n to cancel", YELLOW))
+        render.warn("choose run, change or cancel")
 
 
 def _edit_run(session, plan: dict, repo) -> dict:
     """Walk the settings one at a time. Enter keeps what is shown."""
     installed = [name for name, ok in backends.available() if ok]
-    print(f"\n  {GREY}Enter keeps the value shown.{RESET}")
+    render.out()
+    render.muted("Enter keeps the value shown.")
     if installed:
-        print(f"  {GREY}available: {', '.join(installed)}{RESET}")
+        render.muted(f"available: {', '.join(installed)}")
 
     agents = dict(plan["agents"])
     models = dict(plan.get("models") or {})
@@ -192,16 +197,24 @@ def _edit_run(session, plan: dict, repo) -> dict:
         ("execute", "execute agent"),
         ("review", "review agent"),
     ):
-        agents[role] = _ask_until(
-            session, label, agents[role], lambda v: _valid_agent(v, installed)
+        chosen = (
+            session.ask_select(label, installed, agents[role])
+            if installed else agents[role]
         )
+        try:
+            # A picker cannot offer a bad value, but a typed fallback can.
+            agents[role] = _valid_agent(chosen, installed)
+        except ValueError as exc:
+            render.error(str(exc))
+            agents[role] = _ask_until(
+                session, label, agents[role], lambda v: _valid_agent(v, installed)
+            )
         models[role] = _ask_model(session, agents[role], label, models.get(role, ""))
     plan["agents"] = agents
     plan["models"] = models
 
-    plan["mode"] = _ask_until(
-        session, "mode (supervised/autonomous)", plan["mode"],
-        settings_mod.normalise_mode,
+    plan["mode"] = settings_mod.normalise_mode(
+        session.ask_select("mode", ["supervised", "autonomous"], plan["mode"])
     )
     plan["rounds"] = _ask_until(
         session, "rework rounds", str(plan["rounds"]), _positive
@@ -214,10 +227,10 @@ def _edit_run(session, plan: dict, repo) -> dict:
         lambda v: _valid_branch(v, repo, plan["branch"]),
     )
 
-    print()
-    if session.ask_confirm("  Save these as your defaults? [y/N] ", require="y"):
+    render.out()
+    if session.ask_confirm("Save these as your defaults?", require="y"):
         _save_as_defaults(session, plan)
-        print(colored("  saved", GREEN))
+        render.success("saved")
     return plan
 
 
@@ -232,16 +245,25 @@ def _ask_model(session, backend_name: str, role_label: str, current: str) -> str
         return ""
 
     choices = [name for name, _ in backends.list_options(backend, "model")]
+    label = role_label.replace(" agent", " model")
+
     if choices:
-        shown = ", ".join(choices[:8])
-        more = f", +{len(choices) - 8} more" if len(choices) > 8 else ""
-        print(f"    {GREY}{backend_name} models: {shown}{more}{RESET}")
+        # A picker beats typing one of forty names; the first entry keeps
+        # whatever the CLI would choose for itself.
+        default_label = f"({backend_name} default)"
+        options = [default_label, *choices]
+        picked = session.ask_select(
+            label, options, current if current in choices else default_label
+        )
+        if picked in (default_label, "", None):
+            return ""
+        if picked in choices:
+            return picked
+        current = picked  # typed by hand in a non-interactive session
     else:
         configured = backends.current_flag_value(backend, Role.PLAN, "model_flag")
         hint = f" e.g. {configured}" if configured else ""
-        print(f"    {GREY}{backend_name} model - blank for its default{hint}{RESET}")
-
-    label = role_label.replace(" agent", " model")
+        render.muted(f"  {backend_name} model - blank for its default{hint}")
 
     def check(value: str) -> str:
         wanted = (value or "").strip()
@@ -266,7 +288,7 @@ def _ask_until(session, label: str, default: str, check):
         try:
             return check(raw)
         except (ValueError, CommandError) as exc:
-            print(colored(f"    {exc}", RED))
+            render.error(str(exc))
 
 
 def _valid_agent(value: str, installed: list[str]) -> str:
@@ -334,17 +356,16 @@ def _task_text(session, intent: TaskIntent) -> tuple[str, str]:
 
 
 def cmd_runs(session, command: Command) -> None:
-    for line in render.run_table(session.store.all(), session.runner.is_running):
-        print(line)
+    render.out(render.run_table(session.store.all(), session.runner.is_running))
 
 
 def cmd_show(session, command: Command) -> None:
     wf = find_run(session, command.arg)
-    for line in render.run_detail(wf, session.runner.is_running):
-        print(line)
+    for part in render.run_detail(wf, session.runner.is_running):
+        render.out(part)
     if wf.status is Status.FAILED:
-        for line in logview.failure_context(wf):
-            print(line)
+        for part in logview.failure_context(wf):
+            render.out(part)
 
 
 def cmd_logs(session, command: Command) -> None:
@@ -365,6 +386,13 @@ def cmd_watch(session, command: Command) -> None:
     logview.stream(wf, None, session.runner.is_running)
 
 
+def cmd_progress(session, command: Command) -> None:
+    """A live bar over the checklist, rather than the agents' chatter."""
+    running = [w for w in session.store.all() if session.runner.is_running(w.id)]
+    wf = find_run(session, command.arg, among=running or None)
+    progress.watch(wf, session.runner.is_running)
+
+
 # --------------------------------------------------------------- the merge gate
 
 
@@ -377,10 +405,9 @@ def _awaiting(session) -> list[Workflow]:
 def cmd_pending(session, command: Command) -> None:
     waiting = _awaiting(session)
     if not waiting:
-        print(f"{GREY}  nothing is waiting for approval{RESET}")
+        render.muted("nothing is waiting for approval")
         return
-    for line in render.run_table(waiting, session.runner.is_running):
-        print(line)
+    render.out(render.run_table(waiting, session.runner.is_running))
 
 
 def cmd_approve(session, command: Command) -> None:
@@ -389,17 +416,13 @@ def cmd_approve(session, command: Command) -> None:
         stat = gitops.diffstat(wf.repo_path, wf.base_branch, wf.branch)
     except GitError as exc:
         stat = f"(could not read the diff: {exc})"
-    print(f"  merge {BOLD}{wf.branch}{RESET} into {BOLD}{wf.base_branch}{RESET}")
-    print(render.indent(stat or "(no changes)"))
-    if wf.review_text:
-        print(f"\n  {GREY}reviewer said:{RESET}")
-        print(render.indent(wf.review_text[-800:]))
+    render.out(render.merge_preview(wf, stat))
 
-    if not session.ask_confirm("  Enter to merge, n to cancel: "):
-        print(f"  {GREY}left unmerged{RESET}")
+    if not session.ask_confirm("Merge it?"):
+        render.muted("left unmerged")
         return
     session.runner.approve(wf)
-    print(colored(f"  merging {wf.id[:6]}...", CYAN))
+    render.info(f"merging {wf.id[:6]}...")
 
 
 def cmd_reject(session, command: Command) -> None:
@@ -407,7 +430,7 @@ def cmd_reject(session, command: Command) -> None:
     wf = find_run(session, args[0] if args else "", among=_awaiting(session))
     reason = " ".join(args[1:])
     session.runner.reject(wf, reason)
-    print(colored(f"  {wf.id[:6]} left for rework", YELLOW))
+    render.warn(f"{wf.id[:6]} left for rework")
 
 
 # ------------------------------------------------------------- managing a run
@@ -420,10 +443,10 @@ def cmd_resume(session, command: Command) -> None:
     if wf.status is Status.MERGED:
         raise CommandError("that run is already merged")
     if wf.tasks:
-        print(f"{GREY}  keeping {wf.task_progress} finished items{RESET}")
+        render.muted(f"keeping {wf.task_progress} finished items")
     session.notices.seed(wf)
     session.runner.resume(wf)
-    print(colored(f"  resumed {wf.id[:6]}", GREEN))
+    render.success(f"resumed {wf.id[:6]}")
 
 
 def cmd_retry(session, command: Command) -> None:
@@ -432,7 +455,7 @@ def cmd_retry(session, command: Command) -> None:
         raise CommandError("that run is already going")
     session.notices.seed(wf)
     session.runner.retry(wf)
-    print(colored(f"  rework round {wf.round} on {wf.id[:6]}", GREEN))
+    render.success(f"rework round {wf.round} on {wf.id[:6]}")
 
 
 def cmd_cancel(session, command: Command) -> None:
@@ -440,18 +463,18 @@ def cmd_cancel(session, command: Command) -> None:
     if not session.runner.is_running(wf.id):
         raise CommandError("that run is not going")
     session.runner.cancel(wf)
-    print(colored(f"  {wf.id[:6]} will stop at the next step", YELLOW))
+    render.warn(f"{wf.id[:6]} will stop at the next step")
 
 
 def cmd_rm(session, command: Command) -> None:
     wf = find_run(session, command.arg)
     if session.runner.is_running(wf.id):
         raise CommandError("that run is still going - /cancel it first")
-    if not session.ask_confirm(f"  Delete {wf.id[:6]} ({wf.summary})? [y/N] ", "y"):
+    if not session.ask_confirm(f"Delete {wf.id[:6]} ({wf.summary})?", "y"):
         return
     _forget(session, wf, drop_logs=True, drop_worktree=True)
-    print(colored(f"  deleted {wf.id[:6]}", GREEN))
-    print(f"{GREY}  branch '{wf.branch}' was left alone{RESET}")
+    render.success(f"deleted {wf.id[:6]}")
+    render.muted(f"branch '{wf.branch}' was left alone")
 
 
 def cmd_clear(session, command: Command) -> None:
@@ -468,22 +491,21 @@ def cmd_clear(session, command: Command) -> None:
 
     targets = [w for w in targets if not session.runner.is_running(w.id)]
     if not targets:
-        print(f"{GREY}  nothing to clear{RESET}")
+        render.muted("nothing to clear")
         return
 
-    for wf in targets[:10]:
-        print(f"  {GREY}{wf.id[:6]}  {wf.status.value:<18} {wf.summary}{RESET}")
+    render.out(render.run_table(targets[:10], session.runner.is_running))
     if len(targets) > 10:
-        print(f"  {GREY}... and {len(targets) - 10} more{RESET}")
+        render.muted(f"... and {len(targets) - 10} more")
 
     if not session.ask_confirm(
-        f"  Delete {render.plural(len(targets), 'run')}? [y/N] ", "y"
+        f"Delete {render.plural(len(targets), 'run')}?", "y"
     ):
         return
     for wf in targets:
         _forget(session, wf, drop_logs=True, drop_worktree=True)
-    print(colored(f"  cleared {render.plural(len(targets), 'run')}", GREEN))
-    print(f"{GREY}  no branches were deleted{RESET}")
+    render.success(f"cleared {render.plural(len(targets), 'run')}")
+    render.muted("no branches were deleted")
 
 
 def _forget(session, wf: Workflow, drop_logs: bool, drop_worktree: bool) -> None:
@@ -499,20 +521,11 @@ def _forget(session, wf: Workflow, drop_logs: bool, drop_worktree: bool) -> None
 
 
 def cmd_backends(session, command: Command) -> None:
-    data = config.load_backends()
-    for name, backend in sorted(data.items()):
-        mark = (
-            colored("installed", GREEN) if config.is_installed(backend)
-            else colored("not found", RED)
-        )
-        print(f"  {BOLD}{name}{RESET}  {GREY}({backend.get('bin')}){RESET}  {mark}")
-        print(f"{GREY}     plan/review: {' '.join(backend.get('args', []))}{RESET}")
-        print(
-            f"{GREY}     execute:     "
-            f"{' '.join(backend.get('execute_args') or backend.get('args', []))}{RESET}"
-        )
-    print(f"\n{GREY}  edit {config.backends_path()} for anything not covered "
-          f"by /agents and /model{RESET}")
+    render.out(render.backend_table(config.load_backends()))
+    render.muted(
+        f"edit {config.backends_path()} for anything /agents and /model "
+        f"does not cover"
+    )
 
 
 def _pick_backend_setting(session, command: Command, kind: str) -> None:
@@ -535,17 +548,15 @@ def _pick_backend_setting(session, command: Command, kind: str) -> None:
     value = " ".join(args[1:]).strip()
     choices = backends.list_options(backend, kind)
     if not value:
-        print(f"  {BOLD}{name}{RESET} {kind}s:")
-        for option, note in choices:
-            suffix = f"  {GREY}({note}){RESET}" if note else ""
-            print(f"    {option}{suffix}")
+        render.out(render.option_table(name, kind, choices))
         current_plan = backends.current_flag_value(backend, Role.PLAN, f"{kind}_flag")
         current_exec = backends.current_flag_value(backend, Role.EXECUTE, f"{kind}_flag")
-        print(f"  {GREY}now: plan/review {current_plan or 'default'}, "
-              f"execute {current_exec or 'default'}{RESET}")
-        print(f"  {GREY}set with: /{kind}s {name} <value> [execute|read]{RESET}"
-              if kind == "agent" else
-              f"  {GREY}set with: /{kind} {name} <value> [execute|read]{RESET}")
+        render.muted(
+            f"now: plan/review {current_plan or 'default'}, "
+            f"execute {current_exec or 'default'}"
+        )
+        command = "agents" if kind == "agent" else "model"
+        render.hint(f"/{command} {name} <value> [execute|read]")
         return
 
     parts = value.split()
@@ -570,8 +581,9 @@ def _pick_backend_setting(session, command: Command, kind: str) -> None:
     for key in keys:
         backends.set_flag_value(backend, key, f"{kind}_flag", wanted)
     config.save_backends(data)
-    print(colored(f"  {name} {kind} set to {wanted}"
-                  f"{' for ' + scope if scope else ''}", GREEN))
+    render.success(
+        f"{name} {kind} set to {wanted}{' for ' + scope if scope else ''}"
+    )
 
 
 def cmd_agents(session, command: Command) -> None:
@@ -597,21 +609,13 @@ def cmd_set(session, command: Command) -> None:
     except settings_mod.SettingsError as exc:
         raise CommandError(str(exc)) from None
     settings_mod.save(session.settings)
-    print(colored(f"  {key} = {session.settings[key]}", GREEN))
+    render.success(f"{key} = {session.settings[key]}")
 
 
 def cmd_config(session, command: Command) -> None:
-    print(f"  {BOLD}defaults{RESET}   {GREY}change with /set <key> <value>{RESET}")
-    for key in settings_mod.EDITABLE:
-        value = session.settings.get(key)
-        shown = value if value not in ("", None) else f"{GREY}(auto){RESET}"
-        print(f"    {key:<12}{shown}")
-    roots = session.settings.get("prompt_paths", [])
-    print(f"\n  {BOLD}prompt roots{RESET}  {GREY}/prompts add <path>{RESET}")
-    print(f"    {GREY}always: current directory, ./docs/prompts{RESET}")
-    for root in roots:
-        print(f"    {root}")
-    print(f"\n  {GREY}state {config.home_dir()}{RESET}")
+    render.out(render.settings_table(session.settings, settings_mod.EDITABLE))
+    render.out(render.roots_panel(session.settings.get("prompt_paths", [])))
+    render.muted(f"state {config.home_dir()}")
 
 
 # --------------------------------------------------------------------- prompts
@@ -624,19 +628,15 @@ def cmd_prompts(session, command: Command) -> None:
 
     files = session.prompt_files(refresh=True)
     if not files:
-        print(f"{GREY}  no prompt files found{RESET}")
-        print(f"{GREY}  looked in: "
-              f"{', '.join(label for label, _, _ in promptlib.roots(session.settings, session.cwd))}"
-              f"{RESET}")
+        render.muted("no prompt files found")
+        looked = ", ".join(
+            label for label, _, _ in promptlib.roots(session.settings, session.cwd)
+        )
+        render.muted(f"looked in: {looked}")
         return
 
-    current = None
-    for item in files:
-        if item.source != current:
-            current = item.source
-            print(f"  {BOLD}{current}{RESET}")
-        print(f"    {CYAN}@{item.name}{RESET}  {GREY}{item.label}{RESET}")
-    print(f"\n  {GREY}start one with @name, e.g. @{files[0].name}{RESET}")
+    render.out(render.prompt_table(files))
+    render.hint(f"start one with @name, e.g. @{files[0].name}")
 
 
 def _prompt_roots(session, args: list[str]) -> None:
@@ -649,12 +649,12 @@ def _prompt_roots(session, args: list[str]) -> None:
             directory = settings_mod.add_prompt_path(session.settings, target)
             settings_mod.save(session.settings)
             session.prompt_files(refresh=True)
-            print(colored(f"  searching {directory} for prompts", GREEN))
+            render.success(f"searching {directory} for prompts")
         else:
             if settings_mod.remove_prompt_path(session.settings, target):
                 settings_mod.save(session.settings)
                 session.prompt_files(refresh=True)
-                print(colored(f"  no longer searching {target}", GREEN))
+                render.success(f"no longer searching {target}")
             else:
                 raise CommandError(f"{target} is not a configured root")
     except settings_mod.SettingsError as exc:
@@ -674,6 +674,7 @@ HELP = [
     ("/show <id>", "one run in full"),
     ("/logs <id> [step]", "its logs, all steps or one"),
     ("/watch [id]", "follow a running one live"),
+    ("/progress [id]", "a progress bar over its checklist"),
     ("", ""),
     ("/pending", "runs waiting for your approval"),
     ("/approve <id>", "see the diff, then merge"),
@@ -694,13 +695,7 @@ HELP = [
 
 
 def cmd_help(session, command: Command) -> None:
-    print()
-    for left, right in HELP:
-        if not left:
-            print()
-            continue
-        print(f"  {CYAN}{left:<28}{RESET}{GREY}{right}{RESET}")
-    print()
+    render.out(render.help_table(HELP))
 
 
 TABLE = {
@@ -708,6 +703,7 @@ TABLE = {
     "show": cmd_show, "view": cmd_show,
     "logs": cmd_logs, "log": cmd_logs,
     "watch": cmd_watch, "follow": cmd_watch,
+    "progress": cmd_progress, "bar": cmd_progress,
     "pending": cmd_pending, "waiting": cmd_pending,
     "approve": cmd_approve, "merge": cmd_approve,
     "reject": cmd_reject,
