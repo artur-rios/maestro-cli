@@ -103,6 +103,7 @@ def start_task(session, intent: TaskIntent) -> None:
         agents=plan["agents"],
         models={k: v for k, v in (plan.get("models") or {}).items() if v},
         prompt_source=source,
+        instructions=str(session.settings.get("instructions") or ""),
         mode=Mode(plan["mode"]),
         max_rounds=plan["rounds"],
         max_attempts=plan["attempts"],

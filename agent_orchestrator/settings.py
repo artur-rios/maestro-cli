@@ -32,6 +32,8 @@ DEFAULTS: dict[str, Any] = {
     "confirm": True,
     "follow": True,
     "branch_type": "",
+    # Appended to every agent prompt, for standing house rules.
+    "instructions": "",
     "prompt_paths": [],
 }
 
@@ -50,6 +52,7 @@ EDITABLE: dict[str, str] = {
     "confirm": "bool",
     "follow": "bool",
     "branch_type": "text",
+    "instructions": "text",
 }
 
 

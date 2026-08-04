@@ -146,6 +146,9 @@ class Workflow:
     models: dict[str, str] = field(default_factory=dict)
     #: Where the prompt came from, when read from a file rather than typed.
     prompt_source: str = ""
+    #: Standing instructions, copied from settings when the run is created so
+    #: the run stays reproducible even if the settings change later.
+    instructions: str = ""
     mode: Mode = Mode.SUPERVISED
     max_rounds: int = 2
     #: How many times one execution attempt may be resumed before giving up.
@@ -219,6 +222,7 @@ class Workflow:
             "id": self.id,
             "prompt": self.prompt,
             "prompt_source": self.prompt_source,
+            "instructions": self.instructions,
             "repo_path": self.repo_path,
             "base_branch": self.base_branch,
             "agents": dict(self.agents),
@@ -248,6 +252,7 @@ class Workflow:
             id=data["id"],
             prompt=data["prompt"],
             prompt_source=data.get("prompt_source", ""),
+            instructions=data.get("instructions", ""),
             repo_path=data["repo_path"],
             base_branch=data["base_branch"],
             agents=dict(data["agents"]),

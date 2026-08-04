@@ -130,6 +130,24 @@ Each step records the agent used, status, start and end times, exit code, log
 path, and round number. Nothing is deleted: a failed run keeps its branch and
 its logs.
 
+## Working the project's way
+
+Every prompt opens with a conventions block telling the agent to invoke and
+read the skills that apply, to follow the repository's own instructions
+(CLAUDE.md, AGENTS.md, docs/) over generic practice, and to report what it
+used. The wording matters: asked only to "use your skills" an agent cites one
+from its description without opening it, so the instruction is explicitly to
+open and read rather than recall.
+
+A task naming a use case (`UC-03`, `use case 7`) adds a line pointing at that
+use case's specification and the project's own use case workflow.
+
+Branching, committing and merging are reserved for the orchestrator and the
+prompts say so, so a workflow skill does not also try to drive git.
+
+Standing instructions from settings are copied onto the workflow at creation,
+keeping a run reproducible when the setting later changes.
+
 ## Prompt chaining
 
 - **Plan** receives the original prompt plus repo context and returns an

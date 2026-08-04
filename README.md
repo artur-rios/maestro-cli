@@ -275,6 +275,42 @@ The worktree is the state that matters, and re-reading it works identically
 across all three CLIs and stays correct when several workflows run at once,
 which `--continue`-style "most recent session" flags do not.
 
+### Working the project's way
+
+An agent arrives with skills, commands and repository instructions of its own,
+and a bare "you are the PLANNING agent" framing makes it ignore all of them.
+Every prompt now opens by saying the project's conventions win:
+
+```
+How to work on this:
+
+- Start by checking which of your available skills apply to this task,
+  and invoke every one that does. Open and read them; do not work from
+  a memory or a guess of what a skill contains ...
+- Follow this repository's own instructions -- CLAUDE.md, AGENTS.md,
+  README, and anything under docs/ ... They outrank generic practice
+  and anything in this message.
+- Say which skills and repository documents you used ...
+```
+
+Telling an agent to *open and read* its skills is what makes the difference.
+Asked merely to "use your skills", it will cite one from its description alone;
+asked to invoke and read it, the rules actually come out of the file.
+
+**A task naming a use case** -- `UC-03`, `use case 7`, `implement uc-11` -- adds
+a line pointing the agent at that use case's specification and the project's own
+use case workflow, so a repository with its own process gets that process
+followed rather than an improvised one.
+
+**Branching, committing and merging stay with the orchestrator.** The prompts
+say so explicitly, so a workflow skill that would otherwise open pull requests
+or switch branches leaves the git side alone.
+
+**Standing instructions** apply to every run: `/set instructions "Follow
+docs/requirements/Development Workflow.md to the letter"`. They are copied onto
+each workflow when it is created, so a run stays reproducible even if the
+setting changes later.
+
 ### Branch names
 
 Branches follow conventional naming, with the type inferred from the wording of
@@ -527,6 +563,6 @@ unmodified.
 python -m unittest discover -s tests -t .
 ```
 
-408 tests. The unit tests fake git and the CLIs; the integration tests drive a
+426 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.
