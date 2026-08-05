@@ -189,6 +189,14 @@ def retry(ctx: click.Context, run_id: str) -> None:
     ctx.exit(_run(cmd.cmd_retry, _session(ctx.obj.get("cwd")), run_id))
 
 
+@cli.command("pause", context_settings=CONTEXT)
+@click.argument("run_id", required=False, default="")
+@click.pass_context
+def pause(ctx: click.Context, run_id: str) -> None:
+    """Stop a run for now, keeping what it has committed."""
+    ctx.exit(_run(cmd.cmd_pause, _session(ctx.obj.get("cwd")), run_id))
+
+
 @cli.command("cancel", context_settings=CONTEXT)
 @click.argument("run_id", required=False, default="")
 @click.pass_context

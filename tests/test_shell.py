@@ -269,6 +269,50 @@ class ManagingRuns(ShellTestCase):
         self.assertIn("/cancel", str(ctx.exception))
 
 
+class Pausing(ShellTestCase):
+    def test_pause_reaches_the_runner(self):
+        wf = self.add(Status.EXECUTING)
+        self.session.runner.is_running.return_value = True
+        out = self.run_command("pause", wf.id[:4])
+        self.session.runner.pause.assert_called_once_with(wf)
+        self.assertIn("pause at the next step", out)
+        self.assertIn("/resume", out)
+
+    def test_pausing_an_idle_run_reports_it_done(self):
+        wf = self.add(Status.FAILED)
+        out = self.run_command("pause", wf.id[:4])
+        self.session.runner.pause.assert_called_once_with(wf)
+        self.assertIn("paused", out)
+
+    def test_a_merged_run_cannot_be_paused(self):
+        wf = self.add(Status.MERGED)
+        with self.assertRaises(CommandError) as ctx:
+            self.run_command("pause", wf.id[:4])
+        self.assertIn("already merged", str(ctx.exception))
+
+    def test_pausing_twice_says_so(self):
+        wf = self.add(Status.PAUSED)
+        with self.assertRaises(CommandError) as ctx:
+            self.run_command("pause", wf.id[:4])
+        self.assertIn("already paused", str(ctx.exception))
+
+    def test_a_paused_run_resumes(self):
+        wf = self.add(Status.PAUSED)
+        self.run_command("resume", wf.id[:4])
+        self.session.runner.resume.assert_called_once_with(wf)
+
+    def test_a_run_waiting_for_approval_is_not_resumable(self):
+        wf = self.add(Status.AWAITING_APPROVAL)
+        with self.assertRaises(CommandError) as ctx:
+            self.run_command("resume", wf.id[:4])
+        self.assertIn("/approve", str(ctx.exception))
+
+    def test_hold_is_an_alias(self):
+        wf = self.add(Status.FAILED)
+        self.run_command("hold", wf.id[:4])
+        self.session.runner.pause.assert_called_once()
+
+
 class ClearingHistory(ShellTestCase):
     def test_clear_merged_keeps_the_rest(self):
         merged = self.add(Status.MERGED)

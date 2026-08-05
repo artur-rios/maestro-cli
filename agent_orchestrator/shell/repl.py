@@ -76,6 +76,9 @@ class Notices:
         if wf.status is Status.CHANGES_REQUESTED:
             line.append("changes requested", style="warning")
             return line.append(f" - /show {wf.id[:6]}", style="muted")
+        if wf.status is Status.PAUSED:
+            line.append("paused", style="warning")
+            return line.append(f" - /resume {wf.id[:6]}", style="muted")
         if wf.status is Status.CANCELLED:
             return line.append("cancelled", style="muted")
         return line.append_text(render.status_text(wf.status))
@@ -170,30 +173,43 @@ class Shell:
     def run(self) -> int:
         self.greet()
         first = True
+        last_output = ""
 
         while True:
-            # Redraw the header so the wordmark stays at the top of the
-            # screen. The previous command's output has been read by now --
-            # the user had to look at it to decide what to type next.
+            # Redraw the header so the wordmark stays at the top, then put the
+            # last command's output back underneath it. Clearing alone would
+            # scroll the very thing the user asked for out of sight.
             if not first and self.session.settings.get("pinned", True):
                 render.clear()
                 self.header()
+                render.replay(last_output, self.output_room())
             first = False
 
             for line in self.session.notices.drain(self.session.store.all()):
                 render.out(line)
+
+            render.take_output()  # start recording this turn's output
             try:
                 raw = self.session.asker.command(hint=self.hint())
             except KeyboardInterrupt:
                 render.out()
+                last_output = render.take_output()
                 continue
             except EOFError:
                 render.out()
                 render.muted("bye")
                 return 0
 
-            if not self.handle(raw):
+            keep_going = self.handle(raw)
+            last_output = render.take_output()
+            if not keep_going:
                 return 0
+
+    def output_room(self) -> int:
+        """Lines available for replayed output, after the header and the box."""
+        height = render.console.size.height
+        # wordmark + title + blanks + status bar, then the input box and hint.
+        return max(4, height - len(render.WORDMARK) - 9)
 
     def hint(self) -> str:
         """What to write in the top edge of the input box."""

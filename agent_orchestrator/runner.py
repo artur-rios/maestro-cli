@@ -117,6 +117,7 @@ class Runner:
         self.store = store
         self._threads: dict[str, threading.Thread] = {}
         self._cancels: dict[str, threading.Event] = {}
+        self._pauses: dict[str, threading.Event] = {}
 
     # ---------------------------------------------------------------- lifecycle
 
@@ -149,9 +150,11 @@ class Runner:
         if self.is_running(workflow.id):
             return
         cancel = threading.Event()
+        pause = threading.Event()
         self._cancels[workflow.id] = cancel
+        self._pauses[workflow.id] = pause
         thread = threading.Thread(
-            target=self._run, args=(workflow, cancel), daemon=True,
+            target=self._run, args=(workflow, cancel, pause), daemon=True,
             name=f"workflow-{workflow.id}",
         )
         self._threads[workflow.id] = thread
@@ -169,6 +172,21 @@ class Runner:
         if not self.is_running(workflow.id):
             self._finish(workflow, Status.CANCELLED, "cancelled")
 
+    def pause(self, workflow: Workflow) -> None:
+        """Stop at the next step boundary, meaning to carry on later.
+
+        Like cancelling, an agent already in flight is left to finish rather
+        than killed mid-edit; unlike cancelling, the run is left resumable and
+        keeps everything it has committed.
+        """
+        if workflow.status is Status.MERGED:
+            return
+        event = self._pauses.get(workflow.id)
+        if event:
+            event.set()
+        if not self.is_running(workflow.id):
+            self._finish(workflow, Status.PAUSED, "paused")
+
     def resume(self, workflow: Workflow) -> None:
         """Continue a stopped run from where it left off.
 
@@ -178,6 +196,11 @@ class Runner:
         """
         if self.is_running(workflow.id) or workflow.status is Status.MERGED:
             return
+        # A run paused earlier still carries its stop flag; clear it or the
+        # resumed thread would stop again at the first boundary.
+        paused = self._pauses.get(workflow.id)
+        if paused:
+            paused.clear()
         for task in workflow.tasks:
             if task.status is Status.FAILED:
                 task.status = Status.PENDING
@@ -218,11 +241,12 @@ class Runner:
 
     # ------------------------------------------------------------------- stages
 
-    def _run(self, wf: Workflow, cancel: threading.Event) -> None:
+    def _run(self, wf: Workflow, cancel: threading.Event,
+             pause: threading.Event | None = None) -> None:
         try:
             self._prepare_workspace(wf)
 
-            if self._cancelled(wf, cancel):
+            if self._cancelled(wf, cancel, pause):
                 return
 
             # Plan only when there isn't one. Replanning on a resume would
@@ -234,11 +258,11 @@ class Runner:
 
             feedback = ""
             while True:
-                if self._cancelled(wf, cancel):
+                if self._cancelled(wf, cancel, pause):
                     return
                 if not self._execute_stage(wf, feedback):
                     return
-                if self._cancelled(wf, cancel):
+                if self._cancelled(wf, cancel, pause):
                     return
 
                 verdict = self._review_stage(wf)
@@ -548,9 +572,14 @@ class Runner:
             return None
         return result.output
 
-    def _cancelled(self, wf: Workflow, cancel: threading.Event) -> bool:
+    def _cancelled(self, wf: Workflow, cancel: threading.Event,
+                   pause: threading.Event | None = None) -> bool:
+        """True when the run should stop here, recording why."""
         if cancel.is_set():
             self._finish(wf, Status.CANCELLED, "cancelled")
+            return True
+        if pause is not None and pause.is_set():
+            self._finish(wf, Status.PAUSED, "paused - /resume to continue")
             return True
         return False
 

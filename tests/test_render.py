@@ -298,3 +298,53 @@ class StatusBar(unittest.TestCase):
         text = render.status_bar([("claude", True)], "api", 0, 0).plain
         self.assertNotIn("run", text)
         self.assertNotIn("awaiting", text)
+
+
+class OutputReplay(unittest.TestCase):
+    """A command's output must survive the header redraw, not scroll away."""
+
+    def setUp(self):
+        self.buffer = io.StringIO()
+        self.console = Console(theme=render.THEME, file=self.buffer, width=60,
+                               force_terminal=False, legacy_windows=False,
+                               record=True, highlight=False)
+        patcher = mock.patch.object(render, "console", self.console)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def printed(self) -> str:
+        return ANSI_RE.sub("", self.buffer.getvalue())
+
+    def test_recorded_output_can_be_replayed(self):
+        render.out("the result of a command")
+        recorded = render.take_output()
+        self.buffer.truncate(0)
+        self.buffer.seek(0)
+
+        render.replay(recorded, max_lines=20)
+        self.assertIn("the result of a command", self.printed())
+
+    def test_taking_output_clears_the_recording(self):
+        render.out("first")
+        render.take_output()
+        render.out("second")
+        second = ANSI_RE.sub("", render.take_output())
+        self.assertIn("second", second)
+        self.assertNotIn("first", second)
+
+    def test_a_long_result_is_trimmed_to_what_fits(self):
+        for index in range(50):
+            render.out(f"line {index}")
+        recorded = render.take_output()
+        self.buffer.truncate(0)
+        self.buffer.seek(0)
+
+        render.replay(recorded, max_lines=10)
+        shown = self.printed()
+        self.assertIn("line 49", shown)       # the tail is kept
+        self.assertNotIn("line 5 ", shown)    # the head is dropped
+        self.assertIn("earlier lines", shown)  # and said so
+
+    def test_nothing_recorded_prints_nothing(self):
+        render.replay("", max_lines=10)
+        self.assertEqual(self.printed(), "")

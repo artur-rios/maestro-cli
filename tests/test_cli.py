@@ -51,7 +51,7 @@ class Structure(CliTestCase):
         result = self.invoke("--help")
         self.assertEqual(result.exit_code, 0)
         for name in ("new", "runs", "show", "logs", "watch", "approve",
-                     "reject", "resume", "retry", "cancel", "rm", "clear",
+                     "reject", "resume", "retry", "cancel", "pause", "rm", "clear",
                      "prompts", "backends", "agents", "model", "config", "set"):
             self.assertIn(name, result.output)
 
@@ -63,7 +63,8 @@ class Structure(CliTestCase):
         covered = {
             "cmd_runs", "cmd_show", "cmd_logs", "cmd_watch", "cmd_progress",
             "cmd_pending", "cmd_approve", "cmd_reject", "cmd_resume",
-            "cmd_retry", "cmd_cancel", "cmd_rm", "cmd_clear", "cmd_backends",
+            "cmd_retry", "cmd_cancel", "cmd_pause", "cmd_rm", "cmd_clear",
+            "cmd_backends",
             "cmd_agents", "cmd_model", "cmd_set", "cmd_config", "cmd_prompts",
             "cmd_help",
         }

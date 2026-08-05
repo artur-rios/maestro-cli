@@ -41,6 +41,8 @@ class Status(str, Enum):
     CHANGES_REQUESTED = "changes_requested"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    #: Stopped on purpose and meant to be continued, so not terminal.
+    PAUSED = "paused"
 
     # Step-only values.
     RUNNING = "running"

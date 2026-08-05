@@ -39,12 +39,44 @@ THEME = Theme(
         "s.changes_requested": "yellow",
         "s.failed": "red",
         "s.cancelled": "dim",
+        "s.paused": "yellow",
         "s.running": "cyan",
         "s.done": "green",
     }
 )
 
-console = Console(theme=THEME, highlight=False, soft_wrap=False)
+#: `record` keeps a copy of everything printed while still printing it, which
+#: is what lets the shell redraw a command's output under a fresh header
+#: instead of losing it to the screen clear.
+console = Console(theme=THEME, highlight=False, soft_wrap=False, record=True)
+
+
+def take_output() -> str:
+    """Everything printed since the last call, with its styling, then reset."""
+    try:
+        return console.export_text(clear=True, styles=True)
+    except Exception:  # noqa: BLE001 - recording is a convenience, never fatal
+        return ""
+
+
+def replay(recorded: str, max_lines: int) -> None:
+    """Print recorded output again, keeping only the last `max_lines`.
+
+    A long log would push the header straight back off the screen, so only
+    the tail that fits is shown, with a note about what was dropped.
+    """
+    lines = recorded.rstrip("\n").splitlines()
+    if not lines:
+        return
+    if len(lines) > max_lines:
+        dropped = len(lines) - max_lines
+        console.print(
+            f"[muted]... {dropped} earlier line{'s' if dropped != 1 else ''}"
+            f" - /logs or /show for the whole thing[/]"
+        )
+        lines = lines[-max_lines:]
+    for line in lines:
+        console.print(Text.from_ansi(line))
 
 #: Pure ASCII: a console on a legacy code page cannot render box drawing, and
 #: this is the first thing printed.

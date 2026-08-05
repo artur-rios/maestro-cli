@@ -455,6 +455,8 @@ def cmd_resume(session, command: Command) -> None:
         raise CommandError("that run is already going")
     if wf.status is Status.MERGED:
         raise CommandError("that run is already merged")
+    if wf.status is Status.AWAITING_APPROVAL:
+        raise CommandError("that run is waiting for you - /approve or /reject")
     if wf.tasks:
         render.muted(f"keeping {wf.task_progress} finished items")
     session.notices.seed(wf)
@@ -469,6 +471,22 @@ def cmd_retry(session, command: Command) -> None:
     session.notices.seed(wf)
     session.runner.retry(wf)
     render.success(f"rework round {wf.round} on {wf.id[:6]}")
+
+
+def cmd_pause(session, command: Command) -> None:
+    """Stop a run for now, keeping everything it has committed."""
+    wf = find_run(session, command.arg)
+    if wf.status is Status.MERGED:
+        raise CommandError("that run is already merged")
+    if wf.status is Status.PAUSED:
+        raise CommandError("that run is already paused - /resume to continue")
+    session.notices.seed(wf)
+    session.runner.pause(wf)
+    if session.runner.is_running(wf.id):
+        render.warn(f"{wf.id[:6]} will pause at the next step")
+    else:
+        render.success(f"paused {wf.id[:6]}")
+    render.hint(f"/resume {wf.id[:6]} to carry on")
 
 
 def cmd_cancel(session, command: Command) -> None:
@@ -693,7 +711,8 @@ HELP = [
     ("/approve <id>", "see the diff, then merge"),
     ("/reject <id> [why]", "leave it for rework"),
     ("", ""),
-    ("/resume <id>", "continue where it stopped"),
+    ("/pause <id>", "stop for now, keeping the work"),
+    ("/resume <id>", "continue a paused or failed run"),
     ("/retry <id>", "another rework round"),
     ("/cancel <id>", "stop at the next step"),
     ("/rm <id>", "delete a run"),
@@ -723,6 +742,7 @@ TABLE = {
     "resume": cmd_resume, "continue": cmd_resume,
     "retry": cmd_retry,
     "cancel": cmd_cancel, "stop": cmd_cancel,
+    "pause": cmd_pause, "hold": cmd_pause,
     "rm": cmd_rm, "delete": cmd_rm,
     "clear": cmd_clear,
     "backends": cmd_backends,

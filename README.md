@@ -94,6 +94,11 @@ the hint -- or a nudge, when something is waiting for you:
 ╰──────────────────────────────────────────────────────────────────────────╯
 ```
 
+The last command's output is redrawn underneath the header, so pinning the
+wordmark does not cost you the thing you just asked for. Only the tail that
+fits is replayed; anything longer says how many lines were dropped and points
+at `/logs` or `/show` for the whole of it.
+
 `/set pinned off` returns to a plain scrolling log if you would rather keep the
 scrollback. Without a terminal -- piped input, a captured test -- the box and
 the screen clearing are skipped and the prompt degrades to a plain `>`.
@@ -107,7 +112,8 @@ the screen clearing are skipped and the prompt degrades to a plain `>`.
 | `/runs` `/show <id>` | what is happening, and one run in full |
 | `/logs <id> [step]` `/watch [id]` | its logs; follow a running one live |
 | `/pending` `/approve <id>` `/reject <id> [why]` | the merge gate |
-| `/resume <id>` `/retry <id>` `/cancel <id>` | keep a run going, or stop it |
+| `/pause <id>` `/resume <id>` | stop for now, then carry on |
+| `/retry <id>` `/cancel <id>` | another rework round, or stop for good |
 | `/rm <id>` `/clear merged\|finished\|all` | delete runs |
 | `/prompts [add\|rm <path>]` | saved prompts and where to look for them |
 | `/backends` `/agents` `/model` | which CLI, which bundled agent, which model |
@@ -413,6 +419,26 @@ explored the code and stopped, or ran out of turns. Its last words: ...
 `/show` on a failed run also prints the tail of the failing step's log
 without being asked.
 
+## Stopping and continuing
+
+| | |
+| --- | --- |
+| `/pause <id>` | set a run aside, keeping everything it has committed |
+| `/resume <id>` | carry on: paused, failed, cancelled or interrupted |
+| `/cancel <id>` | stop for good |
+| `/retry <id>` | another rework round after a review rejected the work |
+
+**Pause is not cancel.** Both stop at the next step boundary rather than killing
+an agent mid-edit -- a CLI killed while writing leaves the worktree in an
+unknown state. The difference is what happens next: a cancelled run is over,
+while a paused one keeps its commits, survives a restart, is never swept up by
+`/clear finished`, and continues exactly where it stopped.
+
+**Resume is not retry.** Resuming keeps every checklist item already committed,
+puts a stalled one back in the queue with its attempts reset, and does not
+consume one of your rework rounds -- the work was never rejected, it simply did
+not finish. Retrying is for the other case, when the reviewer asked for changes.
+
 ## Backends
 
 Three are configured out of the box: `claude`, `codex` and `opencode`. Each is
@@ -582,6 +608,6 @@ unmodified.
 python -m unittest discover -s tests -t .
 ```
 
-431 tests. The unit tests fake git and the CLIs; the integration tests drive a
+456 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.
