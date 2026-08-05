@@ -14,7 +14,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-APP_NAME = "ai-agent-orchestrator"
+APP_NAME = "maestro"
 
 #: Bumped whenever the built-in command templates change. A stored file from an
 #: older version has its built-in templates replaced on load.
@@ -94,8 +94,8 @@ DEFAULT_BACKENDS: dict[str, dict[str, Any]] = {
 
 
 def home_dir() -> Path:
-    """Root of all orchestrator state. Override with AIORCH_HOME for tests."""
-    override = os.environ.get("AIORCH_HOME")
+    """Root of all maestro state. Override with MAESTRO_HOME for tests."""
+    override = os.environ.get("MAESTRO_HOME")
     root = Path(override) if override else Path.home() / f".{APP_NAME}"
     root.mkdir(parents=True, exist_ok=True)
     return root

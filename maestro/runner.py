@@ -131,7 +131,7 @@ class Runner:
         for wf in self.store.all():
             if wf.status in ACTIVE_STATUSES and wf.id not in self._threads:
                 wf.status = Status.FAILED
-                wf.message = "interrupted - the orchestrator exited while this was running"
+                wf.message = "interrupted - maestro exited while this was running"
                 for step in wf.steps:
                     if step.status is Status.RUNNING:
                         step.status = Status.FAILED
@@ -350,7 +350,7 @@ class Runner:
                 wf,
                 what="address the review feedback",
                 first_prompt=prompts.execute_prompt(wf, feedback),
-                commit_message=f"aiorch: address review, round {wf.round}",
+                commit_message=f"maestro: address review, round {wf.round}",
             )
 
         if not wf.tasks:
@@ -358,7 +358,7 @@ class Runner:
                 wf,
                 what="implement the plan",
                 first_prompt=prompts.execute_prompt(wf, ""),
-                commit_message=f"aiorch: round {wf.round} changes",
+                commit_message=f"maestro: round {wf.round} changes",
             )
 
         for task in wf.tasks:
@@ -373,7 +373,7 @@ class Runner:
             wf,
             what=task.text,
             first_prompt=prompts.task_prompt(wf, task),
-            commit_message=f"aiorch: {task.text[:60]}",
+            commit_message=f"maestro: {task.text[:60]}",
             task=task,
         )
         task.status = Status.DONE if ok else Status.FAILED

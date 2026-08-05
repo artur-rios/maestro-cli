@@ -7,8 +7,8 @@ every prompt now says plainly that the project's conventions win.
 
 import unittest
 
-from agent_orchestrator import prompts
-from agent_orchestrator.models import Status, Task, Workflow
+from maestro import prompts
+from maestro.models import Status, Task, Workflow
 
 
 def make(prompt="add rate limiting", instructions="", **kwargs):
@@ -69,7 +69,7 @@ class SkillsAreInvited(unittest.TestCase):
         self.assertIn("Do not modify any files", prompts.plan_prompt(make()))
         self.assertIn("Do not modify any files", prompts.review_prompt(make(), "d"))
 
-    def test_the_orchestrator_keeps_the_git_side(self):
+    def test_maestro_keeps_the_git_side(self):
         """A workflow skill must not start branching or opening PRs itself."""
         for step in ("execute", "task", "continue"):
             text = every_prompt(make())[step]
@@ -128,12 +128,12 @@ class StandingInstructions(unittest.TestCase):
 
 class Settings(unittest.TestCase):
     def test_instructions_are_an_editable_setting(self):
-        from agent_orchestrator import settings as settings_mod
+        from maestro import settings as settings_mod
         self.assertIn("instructions", settings_mod.EDITABLE)
         self.assertIn("instructions", settings_mod.DEFAULTS)
 
     def test_a_new_run_carries_the_configured_instructions(self):
-        from agent_orchestrator import settings as settings_mod
+        from maestro import settings as settings_mod
         self.assertEqual(settings_mod.coerce("instructions", " be careful "),
                          "be careful")
 

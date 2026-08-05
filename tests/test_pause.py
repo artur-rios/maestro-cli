@@ -6,9 +6,9 @@ import threading
 import unittest
 from unittest import mock
 
-from agent_orchestrator.backends import RunResult
-from agent_orchestrator.gitops import GitError
-from agent_orchestrator.models import (
+from maestro.backends import RunResult
+from maestro.gitops import GitError
+from maestro.models import (
     ACTIVE_STATUSES,
     TERMINAL_STATUSES,
     Mode,
@@ -17,20 +17,20 @@ from agent_orchestrator.models import (
     Task,
     Workflow,
 )
-from agent_orchestrator.runner import Runner
-from agent_orchestrator.store import Store
+from maestro.runner import Runner
+from maestro.store import Store
 
 
 class PauseTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = self.tmp.name
+        self._old = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = self.tmp.name
         self.addCleanup(self.tmp.cleanup)
 
         self.store = Store()
         self.runner = Runner(self.store)
-        self.git = mock.patch("agent_orchestrator.runner.gitops").start()
+        self.git = mock.patch("maestro.runner.gitops").start()
         self.git.GitError = GitError
         self.git.diff.return_value = "diff"
         self.git.short_status.return_value = ""
@@ -42,9 +42,9 @@ class PauseTestCase(unittest.TestCase):
 
     def tearDown(self):
         if self._old is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old
+            os.environ["MAESTRO_HOME"] = self._old
 
     def make(self, status=Status.PENDING, tasks=None):
         wf = Workflow(
@@ -73,7 +73,7 @@ class PauseTestCase(unittest.TestCase):
         return _run
 
     def drive(self, wf, cancel=None, pause=None):
-        with mock.patch("agent_orchestrator.runner.backends.run",
+        with mock.patch("maestro.runner.backends.run",
                         side_effect=self.agent()):
             self.runner._run(wf, cancel or threading.Event(), pause)
 
@@ -131,7 +131,7 @@ class Pausing(PauseTestCase):
 
 class ResumingAfterPause(PauseTestCase):
     def resume(self, wf):
-        with mock.patch("agent_orchestrator.runner.backends.run",
+        with mock.patch("maestro.runner.backends.run",
                         side_effect=self.agent()):
             self.runner.resume(wf)
             thread = self.runner._threads.get(wf.id)

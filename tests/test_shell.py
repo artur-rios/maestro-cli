@@ -11,11 +11,11 @@ from unittest import mock
 
 from rich.console import Console
 
-from agent_orchestrator import settings as settings_mod, store as store_mod
-from agent_orchestrator.models import Mode, Status, Task, Workflow
-from agent_orchestrator.shell import commands, render, repl
-from agent_orchestrator.shell.commands import CommandError
-from agent_orchestrator.shell.parser import Command
+from maestro import settings as settings_mod, store as store_mod
+from maestro.models import Mode, Status, Task, Workflow
+from maestro.shell import commands, render, repl
+from maestro.shell.commands import CommandError
+from maestro.shell.parser import Command
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -24,8 +24,8 @@ class ShellTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self._old = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = str(self.root / "home")
+        self._old = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = str(self.root / "home")
         self.addCleanup(self.tmp.cleanup)
 
         self.shell = repl.Shell(cwd=self.root)
@@ -62,9 +62,9 @@ class ShellTestCase(unittest.TestCase):
 
     def tearDown(self):
         if self._old is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old
+            os.environ["MAESTRO_HOME"] = self._old
 
     def add(self, status=Status.MERGED, prompt="a task", **kwargs):
         wf = Workflow(
@@ -738,7 +738,7 @@ class Frame(ShellTestCase):
 
     def test_the_header_is_the_banner_closed_off_by_a_divider(self):
         drawn = self.draw(self.shell.header)
-        self.assertIn("AI AGENT ORCHESTRATOR", drawn)
+        self.assertIn("MAESTRO", drawn)
         self.assertIn(render._box().h * 10, drawn)
 
     def test_the_header_no_longer_carries_the_status_bar(self):

@@ -38,7 +38,7 @@ def conventions(workflow: Workflow, may_edit: bool) -> str:
     Agents arrive with skills, slash commands and repository instructions of
     their own, and a bare "you are the PLANNING agent" framing makes them
     ignore all of it. This says plainly that the project's way of working wins,
-    while reserving branching and merging for the orchestrator so a workflow
+    while reserving branching and merging for maestro so a workflow
     skill does not try to run the git side as well.
     """
     lines = [

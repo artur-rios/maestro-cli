@@ -6,12 +6,12 @@ import threading
 import unittest
 from unittest import mock
 
-from agent_orchestrator import prompts
-from agent_orchestrator.backends import RunResult
-from agent_orchestrator.gitops import GitError
-from agent_orchestrator.models import Mode, Role, Status, Task, Workflow
-from agent_orchestrator.runner import Runner, parse_tasks
-from agent_orchestrator.store import Store
+from maestro import prompts
+from maestro.backends import RunResult
+from maestro.gitops import GitError
+from maestro.models import Mode, Role, Status, Task, Workflow
+from maestro.runner import Runner, parse_tasks
+from maestro.store import Store
 
 PLAN_WITH_TASKS = """\
 I will add the entity, then the repository, then the endpoints.
@@ -68,12 +68,12 @@ class Parsing(unittest.TestCase):
 class TaskRunnerTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = self.tmp.name
+        self._old = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = self.tmp.name
         self.store = Store()
         self.runner = Runner(self.store)
 
-        self.git = mock.patch("agent_orchestrator.runner.gitops").start()
+        self.git = mock.patch("maestro.runner.gitops").start()
         self.git.GitError = GitError
         self.git.diff.return_value = "diff"
         self.git.short_status.return_value = " M src/x.cs"
@@ -86,9 +86,9 @@ class TaskRunnerTestCase(unittest.TestCase):
 
     def tearDown(self):
         if self._old is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old
+            os.environ["MAESTRO_HOME"] = self._old
         self.tmp.cleanup()
 
     def make(self, max_attempts=3, mode=Mode.AUTONOMOUS):
@@ -122,7 +122,7 @@ class TaskRunnerTestCase(unittest.TestCase):
         return _run
 
     def drive(self, wf, agent):
-        with mock.patch("agent_orchestrator.runner.backends.run", side_effect=agent):
+        with mock.patch("maestro.runner.backends.run", side_effect=agent):
             self.runner._run(wf, threading.Event())
 
     def execute_prompts(self):
@@ -199,7 +199,7 @@ class Decomposition(TaskRunnerTestCase):
 
         self.prompts_seen.clear()
         with mock.patch(
-            "agent_orchestrator.runner.backends.run", side_effect=self.agent()
+            "maestro.runner.backends.run", side_effect=self.agent()
         ):
             self.runner.retry(wf)
             self.runner._threads[wf.id].join(timeout=10)

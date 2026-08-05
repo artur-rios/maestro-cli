@@ -1,4 +1,4 @@
-# AI Agent Orchestrator
+# Maestro
 
 A prompt-driven shell for building agent workflows. You type a task; it decides
 which AI CLI **plans**, which **executes**, and which **reviews and merges**,
@@ -7,23 +7,23 @@ all three roles.
 
 ```bash
 pip install -r requirements.txt
-python orchestrator.py
+python maestro.py
 ```
 
-Or install it and get the `orchestrator` / `aiorch` commands:
+Or install it and get the `maestro` command:
 
 ```bash
 pip install -e .
 ```
 
 ```
-    ___    ____        ____             __
-   /   |  /  _/       / __ \_________  / /_
-  / /| |  / /        / / / / ___/ ___/ __ \
- / ___ |_/ /        / /_/ / /  / /__/ / / /
-/_/  |_/___/        \____/_/   \___/_/ /_/
+    __  ______    _____________________  ____
+   /  |/  /   |  / ____/ ___/_  __/ __ \/ __ \
+  / /|_/ / /| | / __/  \__ \ / / / /_/ / / / /
+ / /  / / ___ |/ /___ ___/ // / / _, _/ /_/ /
+/_/  /_/_/  |_/_____//____//_/ /_/ |_|\____/
 
-  AI AGENT ORCHESTRATOR  v2.0.0
+  MAESTRO  v2.0.0
 
   claude  codex  opencode   repo identity-manager-api
   3 runs  1 awaiting approval  /help for commands
@@ -63,12 +63,12 @@ The same capabilities are reachable from a script as from the shell, because
 both go through one grammar and one set of handlers:
 
 ```bash
-orchestrator                                  # the interactive shell
-orchestrator new "add rate limiting" --mode auto -y
-orchestrator runs
-orchestrator watch 7f2a1c --progress
-orchestrator approve 7f2a1c
-orchestrator --help
+maestro                                  # the interactive shell
+maestro new "add rate limiting" --mode auto -y
+maestro runs
+maestro watch 7f2a1c --progress
+maestro approve 7f2a1c
+maestro --help
 ```
 
 Subcommands mirror the slash commands one for one, take the same flags, and
@@ -88,12 +88,12 @@ the content in a gutter rail, and a status line sitting directly above the
 prompt.
 
 ```
-    ___    ____        ____             __
-   /   |  /  _/       / __ \_________  / /_
-  / /| |  / /        / / / / ___/ ___/ __ \
- / ___ |_/ /        / /_/ / /  / /__/ / / /
-/_/  |_/___/        \____/_/   \___/_/ /_/
-  AI AGENT ORCHESTRATOR  v2.0.0
+    __  ______    _____________________  ____
+   /  |/  /   |  / ____/ ___/_  __/ __ \/ __ \
+  / /|_/ / /| | / __/  \__ \ / / / /_/ / / / /
+ / /  / / ___ |/ /___ ___/ // / / _, _/ /_/ /
+/_/  /_/_/  |_/_____//____//_/ /_/ |_|\____/
+  MAESTRO  v2.0.0
   ──────────────────────────────────────────────────────────────────────────
   ▌ ID       STATUS              DONE     AGE   TASK
   ▌ ────────────────────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ at `/logs` or `/show` for the whole of it.
 `/set pinned off` returns to a plain scrolling log if you would rather keep the
 scrollback. Without a terminal -- piped input, a captured test -- the frame is
 skipped entirely: no rail, no box, no screen clearing, and the prompt degrades
-to a plain `>`. That is deliberate, and it is what keeps `orchestrator runs >
+to a plain `>`. That is deliberate, and it is what keeps `maestro runs >
 file` worth doing. A console that cannot encode box drawing falls back to
 ASCII rather than failing on the first frame.
 
@@ -309,7 +309,7 @@ unfinished item instead of starting over. A plan without a parseable checklist
 simply falls back to a single invocation, so nothing breaks if an agent ignores
 the format.
 
-**Continuation.** After each invocation the orchestrator counts commits. If the
+**Continuation.** After each invocation maestro counts commits. If the
 count did not move, the work is not done: the agent is pointed back at the
 worktree -- with its `git status` and the commits so far -- and asked to finish,
 up to *attempts per step* times (default 3).
@@ -357,7 +357,7 @@ a line pointing the agent at that use case's specification and the project's own
 use case workflow, so a repository with its own process gets that process
 followed rather than an improvised one.
 
-**Branching, committing and merging stay with the orchestrator.** The prompts
+**Branching, committing and merging stay with maestro.** The prompts
 say so explicitly, so a workflow skill that would otherwise open pull requests
 or switch branches leaves the git side alone.
 
@@ -474,7 +474,7 @@ not finish. Retrying is for the other case, when the reviewer asked for changes.
 Three are configured out of the box: `claude`, `codex` and `opencode`. Each is
 invoked headlessly, once per step, with its output captured to a log.
 
-Command templates live in `~/.ai-agent-orchestrator/backends.json` so you can
+Command templates live in `~/.maestro/backends.json` so you can
 correct a flag without touching any code:
 
 ```json
@@ -572,7 +572,7 @@ keystrokes meant for the prompt.
 
 ## State on disk
 
-Everything lives under `~/.ai-agent-orchestrator/` (override with `AIORCH_HOME`):
+Everything lives under `~/.maestro/` (override with `MAESTRO_HOME`):
 
 ```
 state.json                     every workflow and its steps
@@ -582,7 +582,7 @@ worktrees/<workflow-id>/       the isolated checkout for that run
 ```
 
 State is written after every transition, so runs remain visible after you quit.
-A run interrupted by closing the orchestrator is reported as failed on the next
+A run interrupted by closing maestro is reported as failed on the next
 launch — its thread died with the process — but its branch and logs are kept.
 
 ## Safety
@@ -599,8 +599,8 @@ launch — its thread died with the process — but its branch and logs are kept
 ## Layout
 
 ```
-orchestrator.py            entry point
-agent_orchestrator/
+maestro.py                 entry point
+maestro/
   cli.py                   click command group; bare invocation opens the shell
   models.py                workflows, steps, tasks, statuses
   config.py                paths and backend definitions

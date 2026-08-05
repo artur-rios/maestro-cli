@@ -170,7 +170,7 @@ class Shell:
         if orphans:
             render.warn(
                 f"{render.plural(orphans, 'run')} interrupted when the "
-                f"orchestrator last exited - /resume to continue"
+                f"maestro last exited - /resume to continue"
             )
             render.out()
         for wf in self.session.store.all():

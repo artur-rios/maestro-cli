@@ -4,22 +4,22 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from agent_orchestrator import config
-from agent_orchestrator.models import Status, Workflow
-from agent_orchestrator.store import Store, log_path_for
+from maestro import config
+from maestro.models import Status, Workflow
+from maestro.store import Store, log_path_for
 
 
 class StoreTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self._old_home = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = self.tmp.name
+        self._old_home = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = self.tmp.name
 
     def tearDown(self):
         if self._old_home is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old_home
+            os.environ["MAESTRO_HOME"] = self._old_home
         self.tmp.cleanup()
 
     def make(self, prompt="task"):

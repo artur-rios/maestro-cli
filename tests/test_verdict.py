@@ -1,7 +1,7 @@
 import unittest
 
-from agent_orchestrator.models import Verdict
-from agent_orchestrator.runner import parse_verdict
+from maestro.models import Verdict
+from maestro.runner import parse_verdict
 
 
 class ParseVerdict(unittest.TestCase):

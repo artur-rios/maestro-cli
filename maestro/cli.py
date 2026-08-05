@@ -1,6 +1,6 @@
 """Command-line entry point.
 
-The orchestrator runs a coding task past three AI CLIs in turn: one writes the
+Maestro runs a coding task past three AI CLIs in turn: one writes the
 plan, one implements it on a branch, and one reviews the result and merges it.
 This module is how that is driven from a terminal.
 
@@ -9,11 +9,11 @@ fixed frame: a banner, a divider, output in a gutter rail, and a status line
 above the prompt. Every slash command is also a subcommand here, so the same
 capabilities are available from a script or a one-off shell invocation:
 
-    orchestrator                          # the interactive shell
-    orchestrator new "add rate limiting" --mode auto
-    orchestrator runs
-    orchestrator logs 7f2a1c
-    orchestrator approve 7f2a1c
+    maestro                          # the interactive shell
+    maestro new "add rate limiting" --mode auto
+    maestro runs
+    maestro logs 7f2a1c
+    maestro approve 7f2a1c
 """
 
 from __future__ import annotations
@@ -54,7 +54,7 @@ def _run(handler, session, *args: str) -> int:
 
 
 @click.group(context_settings=CONTEXT, invoke_without_command=True)
-@click.version_option(__version__, "-V", "--version", prog_name="orchestrator")
+@click.version_option(__version__, "-V", "--version", prog_name="maestro")
 @click.option("--repo", type=click.Path(), default=None,
               help="Repository to act on. Defaults to the working directory.")
 @click.pass_context

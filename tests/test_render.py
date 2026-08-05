@@ -8,10 +8,10 @@ from unittest import mock
 from rich.console import Console
 from rich.text import Text
 
-from agent_orchestrator.models import Mode, Status, Step, Role, Task, Workflow
+from maestro.models import Mode, Status, Step, Role, Task, Workflow
 import re
 
-from agent_orchestrator.shell import prompts, render
+from maestro.shell import prompts, render
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -164,7 +164,7 @@ class Summary(unittest.TestCase):
 
 class Tables(unittest.TestCase):
     def test_backends_are_tabulated(self):
-        from agent_orchestrator import config
+        from maestro import config
         out = draw(render.backend_table(config.DEFAULT_BACKENDS), width=140)
         for name in ("claude", "codex", "opencode"):
             self.assertIn(name, out)
@@ -197,13 +197,13 @@ class Banner(unittest.TestCase):
 
     def test_a_wide_terminal_gets_the_wordmark(self):
         out = "".join(draw(p) for p in render.banner(100, "2.0.0"))
-        self.assertIn("AI AGENT ORCHESTRATOR", out)
+        self.assertIn("MAESTRO", out)
         self.assertIn("v2.0.0", out)
         self.assertIn(render.WORDMARK[0].strip(), out)
 
     def test_a_narrow_terminal_gets_a_plain_title(self):
         out = "".join(draw(p, width=30) for p in render.banner(30, "2.0.0"))
-        self.assertIn("AI AGENT ORCHESTRATOR", out)
+        self.assertIn("MAESTRO", out)
         self.assertNotIn(render.WORDMARK[0].strip(), out)
 
 

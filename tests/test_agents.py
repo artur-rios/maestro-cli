@@ -4,8 +4,8 @@ import subprocess
 import unittest
 from unittest import mock
 
-from agent_orchestrator import backends, config
-from agent_orchestrator.models import Role
+from maestro import backends, config
+from maestro.models import Role
 
 AGENT_LIST_OUTPUT = """\
 build (primary)
@@ -29,7 +29,7 @@ class Listing(unittest.TestCase):
 
     def list_with(self, stdout, returncode=0):
         completed = subprocess.CompletedProcess([], returncode, stdout, "")
-        with mock.patch("agent_orchestrator.config.find_binary", return_value="/bin/opencode"):
+        with mock.patch("maestro.config.find_binary", return_value="/bin/opencode"):
             with mock.patch("subprocess.run", return_value=completed):
                 return backends.list_agents(self.BACKEND)
 
@@ -50,17 +50,17 @@ class Listing(unittest.TestCase):
         self.assertEqual(backends.list_agents({"bin": "claude"}), [])
 
     def test_an_uninstalled_backend_reports_nothing(self):
-        with mock.patch("agent_orchestrator.config.find_binary", return_value=None):
+        with mock.patch("maestro.config.find_binary", return_value=None):
             self.assertEqual(backends.list_agents(self.BACKEND), [])
 
     def test_a_crashing_cli_reports_nothing_rather_than_raising(self):
-        with mock.patch("agent_orchestrator.config.find_binary", return_value="/bin/x"):
+        with mock.patch("maestro.config.find_binary", return_value="/bin/x"):
             with mock.patch("subprocess.run", side_effect=OSError("boom")):
                 self.assertEqual(backends.list_agents(self.BACKEND), [])
 
     def test_listing_agents_is_also_shielded_from_ctrl_c(self):
         completed = subprocess.CompletedProcess([], 0, AGENT_LIST_OUTPUT, "")
-        with mock.patch("agent_orchestrator.config.find_binary", return_value="/bin/x"):
+        with mock.patch("maestro.config.find_binary", return_value="/bin/x"):
             with mock.patch("subprocess.run", return_value=completed) as runner:
                 backends.list_agents(self.BACKEND)
         kwargs = runner.call_args.kwargs
@@ -108,7 +108,7 @@ class Models(unittest.TestCase):
     def test_provider_slash_model_lines_are_parsed(self):
         out = "opencode/big-pickle\nopencode-go/glm-5.2\nanthropic/claude-opus-5\n"
         completed = subprocess.CompletedProcess([], 0, out, "")
-        with mock.patch("agent_orchestrator.config.find_binary", return_value="/bin/x"):
+        with mock.patch("maestro.config.find_binary", return_value="/bin/x"):
             with mock.patch("subprocess.run", return_value=completed):
                 models = backends.list_models(self.BACKEND)
         self.assertEqual(

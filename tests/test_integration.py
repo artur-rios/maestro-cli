@@ -14,10 +14,10 @@ import threading
 import unittest
 from pathlib import Path
 
-from agent_orchestrator import config, gitops
-from agent_orchestrator.models import Mode, Status, Verdict, Workflow
-from agent_orchestrator.runner import Runner
-from agent_orchestrator.store import Store
+from maestro import config, gitops
+from maestro.models import Mode, Status, Verdict, Workflow
+from maestro.runner import Runner
+from maestro.store import Store
 
 #: Emits a checklist when planning, implements one item per call, and (when
 #: STALL_ONCE is set) wastes its first execute call without committing.
@@ -77,8 +77,8 @@ HAS_GIT = shutil.which("git") is not None
 class EndToEnd(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
-        self._old_home = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = str(self.tmp / "home")
+        self._old_home = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = str(self.tmp / "home")
 
         self.repo = self.tmp / "repo"
         self.repo.mkdir()
@@ -107,9 +107,9 @@ class EndToEnd(unittest.TestCase):
 
     def tearDown(self):
         if self._old_home is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old_home
+            os.environ["MAESTRO_HOME"] = self._old_home
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _git(self, *args):
@@ -174,7 +174,7 @@ class EndToEnd(unittest.TestCase):
         self.runner._run(wf, threading.Event())
 
         self.assertTrue(wf.branch.startswith("feature/"), wf.branch)
-        self.assertNotIn("aiorch", wf.branch)
+        self.assertNotIn("maestro", wf.branch)
         self.assertNotIn(wf.id, wf.branch)          # no random suffix
         self.assertLessEqual(len(wf.branch.split("/")[1]), 40)
         self.assertTrue(gitops.branch_exists(self.repo, wf.branch))
@@ -307,20 +307,20 @@ class EndToEnd(unittest.TestCase):
         self.assertIs(wf.tasks[0].status, Status.FAILED)
 
     def test_an_interrupted_run_resumes_without_redoing_committed_work(self):
-        """The orchestrator was closed mid-run; resume finishes the job."""
+        """Maestro was closed mid-run; resume finishes the job."""
         self.use_checklist_agent()
         wf = self.make(Mode.AUTONOMOUS)
 
         # Simulate dying after the first checklist item landed.
         wf.plan_text = "Plan: create two files.\n\nTASKS:\n1. Create alpha.txt containing alpha.\n2. Create beta.txt containing beta.\n"
-        from agent_orchestrator.runner import parse_tasks
+        from maestro.runner import parse_tasks
         wf.tasks = parse_tasks(wf.plan_text)
         self.runner._prepare_workspace(wf)
         wf.tasks[0].status = Status.DONE
         subprocess.run(["git", "-C", wf.worktree, "commit", "--allow-empty",
                         "-m", "add alpha"], check=True, capture_output=True)
         wf.status = Status.FAILED
-        wf.message = "interrupted - the orchestrator exited while this was running"
+        wf.message = "interrupted - maestro exited while this was running"
         self.store.add(wf)
 
         self.runner.resume(wf)

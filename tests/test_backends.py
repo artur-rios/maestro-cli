@@ -9,9 +9,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from agent_orchestrator import backends, config
-from agent_orchestrator.backends import BackendError, build_argv
-from agent_orchestrator.models import Role
+from maestro import backends, config
+from maestro.backends import BackendError, build_argv
+from maestro.models import Role
 
 CLAUDE = {
     "bin": "claude",
@@ -218,7 +218,7 @@ class Invocation(unittest.TestCase):
         self.cfg = {"claude": dict(CLAUDE, timeout=42)}
 
         mock.patch(
-            "agent_orchestrator.config.find_binary", return_value="/usr/bin/claude"
+            "maestro.config.find_binary", return_value="/usr/bin/claude"
         ).start()
         self.addCleanup(mock.patch.stopall)
 
@@ -325,7 +325,7 @@ class Invocation(unittest.TestCase):
             self.assertTrue(call.kwargs["start_new_session"])
 
     def test_missing_binary_raises_a_readable_error(self):
-        with mock.patch("agent_orchestrator.config.find_binary", return_value=None):
+        with mock.patch("maestro.config.find_binary", return_value=None):
             with self.assertRaises(BackendError) as ctx:
                 backends.run(
                     "claude", Role.PLAN, "do it", self.tmp.name, self.log, self.cfg

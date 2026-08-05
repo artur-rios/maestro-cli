@@ -1,6 +1,6 @@
 import unittest
 
-from agent_orchestrator.models import Mode, Role, Status, Verdict, Workflow
+from maestro.models import Mode, Role, Status, Verdict, Workflow
 
 
 def make_workflow(**kwargs):
@@ -17,7 +17,7 @@ def make_workflow(**kwargs):
 class WorkflowSerialisation(unittest.TestCase):
     def test_round_trips_through_json_dict(self):
         wf = make_workflow(mode=Mode.AUTONOMOUS, max_rounds=3)
-        wf.branch = "aiorch/add-a-health-check-endpoint-abc123"
+        wf.branch = "maestro/add-a-health-check-endpoint-abc123"
         wf.status = Status.REVIEWING
         wf.verdict = Verdict.APPROVE
         wf.plan_text = "step one"

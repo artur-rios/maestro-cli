@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ai-agent-orchestrator-cli"
+name = "maestro-cli"
 version = "2.0.0"
 description = "Drive claude, codex and opencode through a plan/execute/review/merge workflow"
 readme = "README.md"
@@ -15,8 +15,8 @@ dependencies = [
 ]
 
 [project.scripts]
-orchestrator = "agent_orchestrator.cli:main"
-aiorch = "agent_orchestrator.cli:main"
+maestro = "maestro.cli:main"
+mst = "maestro.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["agent_orchestrator*"]
+include = ["maestro*"]

@@ -2,7 +2,7 @@
 
 import unittest
 
-from agent_orchestrator.shell.parser import (
+from maestro.shell.parser import (
     Command,
     ParseError,
     TaskIntent,

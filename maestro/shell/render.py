@@ -90,11 +90,11 @@ def replay(recorded: str, max_lines: int) -> None:
 #: Pure ASCII: a console on a legacy code page cannot render box drawing, and
 #: this is the first thing printed.
 WORDMARK = (
-    r"    ___    ____        ____             __  ",
-    r"   /   |  /  _/       / __ \_________  / /_ ",
-    r"  / /| |  / /        / / / / ___/ ___/ __ \ ",
-    r" / ___ |_/ /        / /_/ / /  / /__/ / / / ",
-    r"/_/  |_/___/        \____/_/   \___/_/ /_/  ",
+    r"    __  ______    _____________________  ____  ",
+    r"   /  |/  /   |  / ____/ ___/_  __/ __ \/ __ \ ",
+    r"  / /|_/ / /| | / __/  \__ \ / / / /_/ / / / / ",
+    r" / /  / / ___ |/ /___ ___/ // / / _, _/ /_/ /  ",
+    r"/_/  /_/_/  |_/_____//____//_/ /_/ |_|\____/   ",
 )
 WORDMARK_WIDTH = max(len(line) for line in WORDMARK)
 
@@ -390,13 +390,13 @@ def banner(term_width: int | None = None, version: str = "") -> list[RenderableT
     """The wordmark, or a plain title when the terminal is too narrow."""
     term_width = term_width if term_width is not None else width()
     title = Text(" " * MARGIN)
-    title.append("AI AGENT ORCHESTRATOR", style="heading")
+    title.append("MAESTRO", style="heading")
     if version:
         title.append(f"  v{version}", style="muted")
 
     if term_width < WORDMARK_WIDTH + 2:
         short = Text(" " * MARGIN)
-        short.append("AI AGENT ORCHESTRATOR", style="bold accent")
+        short.append("MAESTRO", style="bold accent")
         return [short, Text()]
 
     art = Text()

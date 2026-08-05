@@ -12,25 +12,25 @@ from unittest import mock
 
 from click.testing import CliRunner
 
-from agent_orchestrator import cli
-from agent_orchestrator.models import Status, Workflow
-from agent_orchestrator.store import Store
+from maestro import cli
+from maestro.models import Status, Workflow
+from maestro.store import Store
 
 
 class CliTestCase(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name)
-        self._old = os.environ.get("AIORCH_HOME")
-        os.environ["AIORCH_HOME"] = str(self.root / "home")
+        self._old = os.environ.get("MAESTRO_HOME")
+        os.environ["MAESTRO_HOME"] = str(self.root / "home")
         self.addCleanup(self.tmp.cleanup)
         self.runner = CliRunner()
 
     def tearDown(self):
         if self._old is None:
-            os.environ.pop("AIORCH_HOME", None)
+            os.environ.pop("MAESTRO_HOME", None)
         else:
-            os.environ["AIORCH_HOME"] = self._old
+            os.environ["MAESTRO_HOME"] = self._old
 
     def invoke(self, *args):
         return self.runner.invoke(cli.cli, list(args), obj={})
@@ -57,7 +57,7 @@ class Structure(CliTestCase):
 
     def test_every_shell_command_has_a_subcommand(self):
         """Nothing reachable in the shell should be missing from the CLI."""
-        from agent_orchestrator.shell.commands import TABLE
+        from maestro.shell.commands import TABLE
 
         handlers = {handler.__name__ for handler in TABLE.values()}
         covered = {
@@ -73,7 +73,7 @@ class Structure(CliTestCase):
     def test_version_is_reported(self):
         result = self.invoke("--version")
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("orchestrator", result.output)
+        self.assertIn("maestro", result.output)
 
     def test_the_docstring_describes_the_tool(self):
         result = self.invoke("--help")
@@ -114,7 +114,7 @@ class Settings(CliTestCase):
     def test_set_changes_a_default(self):
         result = self.invoke("set", "mode", "autonomous")
         self.assertEqual(result.exit_code, 0)
-        from agent_orchestrator import settings as settings_mod
+        from maestro import settings as settings_mod
         self.assertEqual(settings_mod.load()["mode"], "autonomous")
 
     def test_a_bad_setting_exits_nonzero(self):
@@ -162,7 +162,7 @@ class NewRun(CliTestCase):
         self.assertNotEqual(result.exit_code, 0)
 
     def test_a_failure_exits_nonzero(self):
-        from agent_orchestrator.shell.commands import CommandError
+        from maestro.shell.commands import CommandError
 
         with mock.patch.object(cli.cmd, "start_task",
                                side_effect=CommandError("no git repo here")):
@@ -177,8 +177,8 @@ class NewRun(CliTestCase):
 class Managing(CliTestCase):
     def test_resume_reaches_the_runner(self):
         wf = self.add(Status.FAILED)
-        with mock.patch("agent_orchestrator.runner.Runner.resume") as resume:
-            with mock.patch("agent_orchestrator.runner.Runner.is_running",
+        with mock.patch("maestro.runner.Runner.resume") as resume:
+            with mock.patch("maestro.runner.Runner.is_running",
                             return_value=False):
                 result = self.invoke("resume", wf.id[:4])
         self.assertEqual(result.exit_code, 0)

@@ -6,8 +6,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
-from agent_orchestrator.shell import promptlib
-from agent_orchestrator.shell.promptlib import PromptError
+from maestro.shell import promptlib
+from maestro.shell.promptlib import PromptError
 
 
 class LibraryTestCase(unittest.TestCase):

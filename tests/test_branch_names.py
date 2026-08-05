@@ -3,7 +3,7 @@
 import unittest
 import unittest.mock
 
-from agent_orchestrator import gitops
+from maestro import gitops
 
 
 class Slugs(unittest.TestCase):
