@@ -83,16 +83,39 @@ tool stays scriptable.
 
 ## The screen
 
-The wordmark and status line are redrawn above every prompt, so what is
-installed, which repo you are pointed at and how many runs are waiting stay in
-view rather than scrolling away. The input sits in a box whose top edge carries
-the hint -- or a nudge, when something is waiting for you:
+The shell draws inside a frame of three bands: a header that does not move,
+the content in a gutter rail, and a status line sitting directly above the
+prompt.
 
 ```
-╭ 1 awaiting approval - /approve ──────────────────────────────────────────╮
-│ > add rate limiting to the scope endpoints
-╰──────────────────────────────────────────────────────────────────────────╯
+    ___    ____        ____             __
+   /   |  /  _/       / __ \_________  / /_
+  / /| |  / /        / / / / ___/ ___/ __ \
+ / ___ |_/ /        / /_/ / /  / /__/ / / /
+/_/  |_/___/        \____/_/   \___/_/ /_/
+  AI AGENT ORCHESTRATOR  v2.0.0
+  ──────────────────────────────────────────────────────────────────────────
+  ▌ ID       STATUS              DONE     AGE   TASK
+  ▌ ────────────────────────────────────────────────────────────────────────
+  ▌ 7f2a1c   merged               3/3   12m20s  add rate limiting
+  ▌ a91b04   executing            1/2    2m04s  fix the flaky test *
+  ▌ d8ea29   awaiting_approval    0/3      41s  port the settings screen
+
+  claude  codex  opencode   my-api   3 runs   1 awaiting approval
+  ╭─ 1 awaiting approval - /approve ────────────────────────────────────────╮
+  │ > add rate limiting to the scope endpoints
+  ╰─────────────────────────────────────────────────────────────────────────╯
 ```
+
+One width governs the divider, the rail, the status line and the input box, so
+every element shares a left and a right edge. It tracks the terminal but stops
+at 100 columns, past which a line of prose gets tiring and the prompt drifts
+far from what it refers to.
+
+The status line is redrawn every turn rather than once, so what is installed,
+which repo you are pointed at and how many runs are waiting stay in view rather
+than scrolling away. The top edge of the input box carries the hint -- or a
+nudge, when something needs you.
 
 The last command's output is redrawn underneath the header, so pinning the
 wordmark does not cost you the thing you just asked for. Only the tail that
@@ -100,8 +123,15 @@ fits is replayed; anything longer says how many lines were dropped and points
 at `/logs` or `/show` for the whole of it.
 
 `/set pinned off` returns to a plain scrolling log if you would rather keep the
-scrollback. Without a terminal -- piped input, a captured test -- the box and
-the screen clearing are skipped and the prompt degrades to a plain `>`.
+scrollback. Without a terminal -- piped input, a captured test -- the frame is
+skipped entirely: no rail, no box, no screen clearing, and the prompt degrades
+to a plain `>`. That is deliberate, and it is what keeps `orchestrator runs >
+file` worth doing. A console that cannot encode box drawing falls back to
+ASCII rather than failing on the first frame.
+
+Raw agent output is the one thing the rail leaves alone. While a step is
+followed, that stream belongs to the agent's own CLI, escape sequences and
+all, and prefixing it line by line would corrupt it.
 
 ## Commands
 
@@ -581,14 +611,14 @@ agent_orchestrator/
   prompts.py               what each agent is told
   runner.py                the state machine
   shell/
-    repl.py                the prompt loop, banner, notices
+    repl.py                the prompt loop, header, footer, notices
     parser.py              a typed line -> an intent (pure, no I/O)
     commands.py            the command table and handlers
     prompts.py             questionary prompts, with plain fallbacks
     promptlib.py           finding and loading saved prompts
     logview.py             streaming and following step logs
     progress.py            the live progress view
-    render.py              rich console, tables, panels, messages
+    render.py              rich console, the frame, tables, panels, messages
 tests/
 ```
 

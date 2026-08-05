@@ -60,10 +60,10 @@ def watch(wf: Workflow, is_running) -> None:
     def frame():
         grid = Table.grid()
         grid.add_row(progress)
-        grid.add_row(Text(f"  {wf.branch}", style="muted"))
+        grid.add_row(Text(wf.branch, style="muted"))
         if wf.tasks:
             grid.add_row(render.checklist(wf))
-        return grid
+        return render.framed(grid)
 
     interrupted = False
     try:
@@ -91,11 +91,11 @@ def watch(wf: Workflow, is_running) -> None:
         render.warn("stopped watching - the run continues")
         return
 
-    line = Text("  ")
+    line = Text()
     line.append(wf.id[:6], style="id")
     line.append(" is ")
     line.append_text(render.status_text(wf.status))
     render.out(line)
     if wf.message:
         style = "error" if wf.status is Status.FAILED else "muted"
-        render.out(Text(f"  {wf.message}", style=style))
+        render.out(Text(wf.message, style=style))

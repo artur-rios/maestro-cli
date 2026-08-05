@@ -6,6 +6,7 @@ import unittest
 from unittest import mock
 
 from rich.console import Console
+from rich.text import Text
 
 from agent_orchestrator.models import Mode, Status, Step, Role, Task, Workflow
 import re
@@ -282,6 +283,137 @@ class InputBox(unittest.TestCase):
         top = ANSI_RE.sub("", self.capture(render.box_top, "")).strip("\n")
         bottom = ANSI_RE.sub("", self.capture(render.box_bottom)).strip("\n")
         self.assertEqual(len(top), len(bottom))
+
+
+class Frame(unittest.TestCase):
+    """One width governs the divider, the rail and the input box."""
+
+    def use(self, width, terminal=True):
+        buffer = io.StringIO()
+        console = Console(theme=render.THEME, file=buffer, width=width,
+                          force_terminal=terminal, legacy_windows=False,
+                          highlight=False)
+        patcher = mock.patch.object(render, "console", console)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return buffer
+
+    def test_the_frame_stops_widening_at_the_cap(self):
+        self.use(200)
+        self.assertEqual(render.frame_width(), render.FRAME_MAX - render.MARGIN)
+
+    def test_a_narrow_terminal_shrinks_the_frame(self):
+        self.use(50)
+        self.assertEqual(render.frame_width(), 50 - render.MARGIN)
+
+    def test_the_divider_spans_the_frame(self):
+        buffer = self.use(60)
+        render.divider()
+        drawn = ANSI_RE.sub("", buffer.getvalue()).strip("\n")
+        self.assertEqual(len(drawn), render.MARGIN + render.frame_width())
+
+    def test_a_divider_can_carry_a_label(self):
+        buffer = self.use(60)
+        render.divider("logs")
+        drawn = ANSI_RE.sub("", buffer.getvalue()).strip("\n")
+        self.assertIn("─ logs ─", drawn)
+        self.assertEqual(len(drawn), render.MARGIN + render.frame_width())
+
+    def test_the_ascii_fallback_takes_over_when_the_encoding_cannot_cope(self):
+        """A legacy code page must degrade, not raise on the first frame."""
+        buffer = self.use(60)
+        with mock.patch.object(type(render.console), "encoding", "cp1252"):
+            render.divider()
+            render.box_top("type a task")
+            render.out(Text("content"))
+        drawn = ANSI_RE.sub("", buffer.getvalue())
+        self.assertNotIn("─", drawn)
+        self.assertNotIn("▌", drawn)
+        self.assertIn("| content", drawn)
+
+    def test_the_divider_and_the_input_box_are_the_same_width(self):
+        buffer = self.use(60)
+        render.divider()
+        render.box_bottom()
+        lines = ANSI_RE.sub("", buffer.getvalue()).strip("\n").splitlines()
+        self.assertEqual(len(lines[0]), len(lines[1]))
+
+
+class RailTests(unittest.TestCase):
+    """Content is drawn inside a gutter, but only when there is a screen."""
+
+    def draw(self, renderable, width=60, terminal=True, **kwargs):
+        buffer = io.StringIO()
+        console = Console(theme=render.THEME, file=buffer, width=width,
+                          force_terminal=terminal, legacy_windows=False,
+                          highlight=False)
+        with mock.patch.object(render, "console", console):
+            render.out(renderable, **kwargs)
+        return ANSI_RE.sub("", buffer.getvalue())
+
+    def body(self, printed):
+        return [line for line in printed.splitlines() if line.strip()]
+
+    def test_every_line_gets_the_gutter_not_just_the_first(self):
+        paragraph = Text(" ".join(f"word{n}" for n in range(60)))
+        lines = self.body(self.draw(paragraph))
+        self.assertGreater(len(lines), 1)
+        for line in lines:
+            self.assertTrue(line.startswith("  ▌ "), line)
+
+    def test_a_table_is_railed_on_every_row(self):
+        wf = make(prompt="add rate limiting")
+        table = render.run_table([wf], lambda i: False)
+        for line in self.body(self.draw(table)):
+            self.assertTrue(line.startswith("  ▌"), line)
+
+    def test_a_blank_line_keeps_the_rail_but_trails_no_whitespace(self):
+        """The bar stays unbroken inside a block without dirtying a copy."""
+        from rich.console import Group
+        printed = self.draw(Group(Text("above"), Text(""), Text("below")))
+        self.assertEqual(
+            [line for line in printed.splitlines() if line.strip()],
+            ["  ▌ above", "  ▌", "  ▌ below"],
+        )
+
+    def test_a_table_wraps_inside_the_rail_instead_of_overflowing(self):
+        wf = make(prompt="add rate limiting to the public API gateway")
+        printed = self.draw(render.run_table([wf], lambda i: False), width=60)
+        for line in self.body(printed):
+            self.assertLessEqual(len(line), 60)
+
+    def test_a_pipe_gets_clean_text_with_no_gutter(self):
+        printed = self.draw(Text("plain output"), terminal=False)
+        self.assertIn("plain output", printed)
+        self.assertNotIn("▌", printed)
+
+    def test_a_bare_call_stays_a_blank_line(self):
+        self.assertNotIn("▌", self.draw(""))
+
+    def test_the_message_helpers_are_railed(self):
+        for fn in (render.success, render.warn, render.error,
+                   render.info, render.muted, render.hint):
+            buffer = io.StringIO()
+            console = Console(theme=render.THEME, file=buffer, width=60,
+                              force_terminal=True, legacy_windows=False,
+                              highlight=False)
+            with mock.patch.object(render, "console", console):
+                fn("something happened")
+            printed = ANSI_RE.sub("", buffer.getvalue())
+            self.assertIn("something happened", printed)
+            self.assertTrue(printed.startswith("  ▌ "), (fn.__name__, printed))
+
+    def test_wide_output_escapes_the_cap_but_keeps_the_gutter(self):
+        row = Text("x" * 160)
+        lines = self.body(self.draw(row, width=180, wide=True))
+        self.assertEqual(len(lines), 1)          # not wrapped into the frame
+        self.assertTrue(lines[0].startswith("  ▌ "))
+
+    def test_narrow_output_is_capped_at_the_frame(self):
+        row = Text("x" * 160)
+        lines = self.body(self.draw(row, width=180))
+        self.assertGreater(len(lines), 1)        # wrapped to the frame width
+        self.assertLessEqual(len(lines[0]), render.FRAME_MAX)
 
 
 class StatusBar(unittest.TestCase):

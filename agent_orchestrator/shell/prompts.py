@@ -53,7 +53,7 @@ class Asker:
         if self.fancy:
             try:
                 answer = questionary.text(
-                    f"{label}:", default=default, style=STYLE, qmark=" "
+                    f"{label}:", default=default, style=STYLE, qmark="  "
                 ).unsafe_ask()
             except (KeyboardInterrupt, EOFError):
                 raise
@@ -75,7 +75,7 @@ class Asker:
             try:
                 return bool(
                     questionary.confirm(
-                        message, default=default, style=STYLE, qmark=" "
+                        message, default=default, style=STYLE, qmark="  "
                     ).unsafe_ask()
                 )
             except (KeyboardInterrupt, EOFError):
@@ -102,7 +102,7 @@ class Asker:
                     choices=options,
                     default=default if default in options else None,
                     style=STYLE,
-                    qmark=" ",
+                    qmark="  ",
                     instruction="(arrows, enter)",
                 ).unsafe_ask()
             except (KeyboardInterrupt, EOFError):

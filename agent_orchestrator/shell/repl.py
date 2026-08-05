@@ -57,7 +57,7 @@ class Notices:
         return lines
 
     def _describe(self, wf, previous: tuple[str, str], state: tuple[str, str]) -> Text:
-        line = Text("  ")
+        line = Text()
         line.append(f"[{wf.id[:6]}]", style="id")
         line.append(" ")
         status, progress = state
@@ -140,21 +140,29 @@ class Shell:
     # ------------------------------------------------------------------ start
 
     def header(self) -> None:
-        """The wordmark and a status line. Drawn above every prompt."""
-        session = self.session
-        render.out()
+        """The wordmark, closed off by a divider. The top of the frame."""
+        render.plain()
         for part in render.banner(render.width(), __version__):
-            render.out(part)
+            render.plain(part)
+        render.divider()
 
+    def footer(self) -> None:
+        """What is installed and what is pending, just above the input box.
+
+        Drawn every turn rather than once, because it reports live state. It
+        must be printed before the turn's recording starts, or it would be
+        replayed into the content area on the next redraw and the status line
+        would march down the screen.
+        """
+        session = self.session
         runs = session.store.all()
-        render.out()
+        render.plain()
         render.line(render.status_bar(
             backends.available(),
             Path(session.settings.get("repo") or str(session.cwd)).name,
             len(runs),
             sum(1 for w in runs if w.status is Status.AWAITING_APPROVAL),
         ))
-        render.out()
 
     def greet(self) -> None:
         self.header()
@@ -188,6 +196,9 @@ class Shell:
             for line in self.session.notices.drain(self.session.store.all()):
                 render.out(line)
 
+            self.footer()
+            # Clearing here drops the footer from the recording along with it,
+            # which is the point: the turn starts on a clean slate.
             render.take_output()  # start recording this turn's output
             try:
                 raw = self.session.asker.command(hint=self.hint())
@@ -208,8 +219,11 @@ class Shell:
     def output_room(self) -> int:
         """Lines available for replayed output, after the header and the box."""
         height = render.console.size.height
-        # wordmark + title + blanks + status bar, then the input box and hint.
-        return max(4, height - len(render.WORDMARK) - 9)
+        # Header: a blank, the wordmark, its title, the divider. Footer: a
+        # blank and the status bar. Then the input box's three lines, and one
+        # spare so the result never sits flush against the prompt.
+        chrome = len(render.WORDMARK) + 3 + 2 + 3 + 1
+        return max(4, height - chrome)
 
     def hint(self) -> str:
         """What to write in the top edge of the input box."""

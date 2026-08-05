@@ -3,6 +3,10 @@
 Presentation only: these helpers render text and never decide anything, so the
 command handlers stay about behaviour. Output goes through a single rich
 Console so styling, wrapping and terminal detection are handled in one place.
+
+The screen is a frame of three bands: a header that does not move, a content
+area written inside a gutter rail, and a footer sitting directly above the
+cursor. One width governs all of them, so every element shares an edge.
 """
 
 from __future__ import annotations
@@ -10,8 +14,10 @@ from __future__ import annotations
 import time
 
 from rich.box import ROUNDED, SIMPLE
-from rich.console import Console, Group, RenderableType
+from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
+from rich.measure import Measurement
 from rich.panel import Panel
+from rich.segment import Segment
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
@@ -28,6 +34,8 @@ THEME = Theme(
         "accent": "red",
         "heading": "bold",
         "id": "bright_black",
+        "rail": "bright_black",
+        "divider": "bright_black",
         # One entry per status, so a status is coloured the same everywhere.
         "s.pending": "dim",
         "s.planning": "cyan",
@@ -70,10 +78,11 @@ def replay(recorded: str, max_lines: int) -> None:
         return
     if len(lines) > max_lines:
         dropped = len(lines) - max_lines
-        console.print(
-            f"[muted]... {dropped} earlier line{'s' if dropped != 1 else ''}"
-            f" - /logs or /show for the whole thing[/]"
-        )
+        out(Text(
+            f"... {dropped} earlier line{'s' if dropped != 1 else ''}"
+            f" - /logs or /show for the whole thing",
+            style="muted",
+        ))
         lines = lines[-max_lines:]
     for line in lines:
         console.print(Text.from_ansi(line))
@@ -98,6 +107,98 @@ _SHADES = ("color(210)", "color(203)", "color(196)", "color(160)", "color(124)")
 
 def width() -> int:
     return console.size.width
+
+
+# -------------------------------------------------------------------- frame
+
+#: Content stops widening here. Past this a line of prose is tiring to read,
+#: and the prompt would drift far from what it refers to.
+FRAME_MAX = 100
+
+#: Space between the left of the terminal and the frame's own left edge.
+MARGIN = 2
+
+#: Margin, the rail itself, and the space before content starts.
+GUTTER_WIDTH = MARGIN + 2
+
+
+def frame_width() -> int:
+    """How wide the frame's own edges are, excluding the left margin.
+
+    The divider, the gutter rail, the status bar and the input box all measure
+    themselves with this, which is the whole point: they line up because they
+    ask the same question rather than each guessing.
+    """
+    return max(10, min(console.size.width, FRAME_MAX) - MARGIN)
+
+
+def content_width() -> int:
+    """Room left for content once the rail has taken its share."""
+    return max(10, frame_width() - 2)
+
+
+def _gutter() -> str:
+    return f"{' ' * MARGIN}{'|' if _box().plain else '▌'} "
+
+
+class Rail:
+    """A renderable drawn inside the frame, with the gutter down its left.
+
+    Wrapping happens at the segment level rather than by prefixing strings.
+    That is what lets one class handle everything the shell prints: a Table
+    re-wraps its columns to the narrowed width instead of spilling past the
+    gutter, a Panel draws its border inside the rail, and a wrapped paragraph
+    gets the gutter on every line rather than only its first.
+    """
+
+    def __init__(self, renderable: RenderableType, wide: bool = False) -> None:
+        self.renderable = renderable
+        self.wide = wide
+
+    def _inner_width(self) -> int:
+        """`wide` lets a renderable off the cap, keeping only the gutter.
+
+        The backends table carries five columns and is already tight at a
+        hundred; squeezed into the frame it folds into an unreadable stack.
+        For that one case legibility is worth breaking the right edge.
+        """
+        if self.wide:
+            return max(content_width(), console.size.width - GUTTER_WIDTH)
+        return content_width()
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        inner = options.update(width=self._inner_width(), height=None)
+        style = console.get_style("rail", default="dim")
+        gutter = Segment(_gutter(), style)
+        # A blank line keeps the rail going -- the bar should be unbroken
+        # within a block -- but drops the space after it, so an empty line
+        # ends at the rail instead of trailing whitespace into a copy buffer.
+        bare = Segment(_gutter().rstrip(), style)
+        # pad=False keeps the lines ragged for the same reason.
+        for line in console.render_lines(self.renderable, inner, pad=False):
+            blank = not any(segment.text.strip() for segment in line)
+            yield bare if blank else gutter
+            if not blank:
+                yield from line
+            yield Segment.line()
+
+    def __rich_measure__(
+        self, console: Console, options: ConsoleOptions
+    ) -> Measurement:
+        total = self._inner_width() + GUTTER_WIDTH
+        return Measurement(total, total)
+
+
+def framed(renderable: RenderableType, wide: bool = False) -> RenderableType:
+    """`renderable` in the rail when there is a screen, untouched otherwise.
+
+    Piping must keep producing clean text -- a gutter in a redirected file
+    would break anything reading it -- so the rail is a terminal affordance
+    only, the same rule the box-drawing fallback already follows.
+    """
+    return Rail(renderable, wide=wide) if console.is_terminal else renderable
 
 
 def status_style(status: Status) -> str:
@@ -130,41 +231,58 @@ def indent(text: str, prefix: str = "    ") -> str:
 # ------------------------------------------------------------------ messages
 
 
-def out(renderable: RenderableType = "") -> None:
+def out(renderable: RenderableType = "", wide: bool = False) -> None:
+    """Print into the content area.
+
+    Everything the commands say goes through here, so the rail is applied in
+    one place and no call site has to know the frame exists. A bare call is a
+    spacer: it stays a genuinely blank line, which breaks the rail into blocks
+    instead of drawing one unbroken bar down the screen.
+    """
+    if renderable == "":
+        console.print()
+        return
+    console.print(framed(renderable, wide=wide))
+
+
+def plain(renderable: RenderableType = "") -> None:
+    """Print chrome -- banner, divider, footer -- outside the rail."""
     console.print(renderable)
 
 
 def success(message: str) -> None:
-    console.print(f"  [success]{message}[/]")
+    out(Text(message, style="success"))
 
 
 def warn(message: str) -> None:
-    console.print(f"  [warning]{message}[/]")
+    out(Text(message, style="warning"))
 
 
 def error(message: str) -> None:
     """A failure the user needs to act on, with the cause spelled out."""
-    console.print(f"  [error]x[/] {message}", style="red")
+    line = Text("x ", style="error")
+    line.append(message, style="red")
+    out(line)
 
 
 def info(message: str) -> None:
-    console.print(f"  [info]{message}[/]")
+    out(Text(message, style="info"))
 
 
 def muted(message: str) -> None:
-    console.print(f"  [muted]{message}[/]")
+    out(Text(message, style="muted"))
 
 
 def hint(message: str) -> None:
     """A nudge towards the command that would help."""
-    console.print(f"  [muted]-> {message}[/]")
+    out(Text(f"-> {message}", style="muted"))
 
 
 def field(label: str, value: RenderableType, label_width: int = 8) -> None:
-    line = Text("  ")
+    line = Text()
     line.append(f"{label:<{label_width}}", style="muted")
     line.append_text(value if isinstance(value, Text) else Text(str(value)))
-    console.print(line)
+    out(line)
 
 
 # -------------------------------------------------------------------- banner
@@ -174,36 +292,70 @@ class _Box:
     """Edge characters, falling back to ASCII where box drawing will not render."""
 
     def __init__(self, plain: bool) -> None:
+        self.plain = plain
         self.h = "-" if plain else "─"
         self.v = "|" if plain else "│"
         self.tl, self.tr = ("+", "+") if plain else ("╭", "╮")
         self.bl, self.br = ("+", "+") if plain else ("╰", "╯")
 
 
+def _drawable() -> bool:
+    """Whether the output encoding can carry box drawing and the rail.
+
+    A Windows console left on a legacy code page raises UnicodeEncodeError on
+    the first frame rather than degrading, which would take the whole shell
+    down before it has drawn anything. Ask the stream, and fall back to ASCII
+    when the answer is no.
+    """
+    try:
+        "─▌".encode(console.encoding or "ascii")
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
 def _box() -> _Box:
-    return _Box(console.options.legacy_windows or not console.is_terminal)
+    return _Box(
+        console.options.legacy_windows
+        or not console.is_terminal
+        or not _drawable()
+    )
 
 
-#: The left edge drawn beside the input line itself.
-BOX_LEFT = "│"
+#: The left edge drawn beside the input line itself, margin included so the
+#: cursor lands under the gutter rather than beside it.
+BOX_LEFT = f"{' ' * MARGIN}│"
 
 
 def _box_width() -> int:
-    return max(10, min(console.size.width, 100) - 2)
+    """Inner width of the input box, edges excluded."""
+    return max(10, frame_width() - 2)
+
+
+def _edge(h: str, label: str, span: int) -> str:
+    """A horizontal run with `label` set into it, one dash in from the left."""
+    text = f"{h} {label} " if label else ""
+    return text + h * max(0, span - len(text))
 
 
 def box_top(hint: str = "") -> None:
     """Top edge of the input box, with an optional hint written into it."""
     box = _box()
-    label = f" {hint} " if hint else ""
-    fill = box.h * max(0, _box_width() - len(label))
-    console.print(f"[muted]{box.tl}{label}{fill}{box.tr}[/]",
+    edge = _edge(box.h, hint, _box_width())
+    console.print(f"{' ' * MARGIN}[muted]{box.tl}{edge}{box.tr}[/]",
                   highlight=False, no_wrap=True)
 
 
 def box_bottom() -> None:
     box = _box()
-    console.print(f"[muted]{box.bl}{box.h * _box_width()}{box.br}[/]",
+    console.print(f"{' ' * MARGIN}[muted]{box.bl}{box.h * _box_width()}{box.br}[/]",
+                  highlight=False, no_wrap=True)
+
+
+def divider(label: str = "") -> None:
+    """The line under the banner that closes the header off from the content."""
+    edge = _edge(_box().h, label, frame_width())
+    console.print(f"{' ' * MARGIN}[divider]{edge}[/]",
                   highlight=False, no_wrap=True)
 
 
@@ -237,12 +389,15 @@ def status_bar(agents: list[tuple[str, bool]], repo: str, runs: int,
 def banner(term_width: int | None = None, version: str = "") -> list[RenderableType]:
     """The wordmark, or a plain title when the terminal is too narrow."""
     term_width = term_width if term_width is not None else width()
-    title = Text("AI AGENT ORCHESTRATOR", style="heading")
+    title = Text(" " * MARGIN)
+    title.append("AI AGENT ORCHESTRATOR", style="heading")
     if version:
         title.append(f"  v{version}", style="muted")
 
     if term_width < WORDMARK_WIDTH + 2:
-        return [Text("AI AGENT ORCHESTRATOR", style="bold accent"), Text()]
+        short = Text(" " * MARGIN)
+        short.append("AI AGENT ORCHESTRATOR", style="bold accent")
+        return [short, Text()]
 
     art = Text()
     for shade, line in zip(_SHADES, WORDMARK):
@@ -256,7 +411,7 @@ def banner(term_width: int | None = None, version: str = "") -> list[RenderableT
 def run_table(workflows: list[Workflow], is_running, now: float | None = None) -> RenderableType:
     """One row per run, newest first."""
     if not workflows:
-        return Text("  no runs yet - type a task to start one", style="muted")
+        return Text("no runs yet - type a task to start one", style="muted")
 
     moment = now or time.time()
     table = Table(box=SIMPLE, pad_edge=False, expand=False, header_style="heading")
@@ -425,7 +580,7 @@ def settings_table(settings: dict, editable) -> RenderableType:
             else Text("(auto)", style="muted")
         )
         table.add_row(key, shown)
-    return Group(table, Text("  change with /set <key> <value>", style="muted"))
+    return Group(table, Text("change with /set <key> <value>", style="muted"))
 
 
 def roots_panel(roots: list[str]) -> RenderableType:
@@ -461,7 +616,7 @@ def help_table(entries) -> RenderableType:
 
 def merge_preview(wf: Workflow, diffstat: str) -> RenderableType:
     """What approving this run would land, and what the reviewer said."""
-    header = Text("  merge ")
+    header = Text("merge ")
     header.append(wf.branch, style="heading")
     header.append(" into ")
     header.append(wf.base_branch, style="heading")

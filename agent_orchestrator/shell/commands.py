@@ -276,7 +276,7 @@ def _ask_model(session, backend_name: str, role_label: str, current: str) -> str
 
     configured = backends.current_flag_value(backend, Role.PLAN, "model_flag")
     hint = f" e.g. {configured}" if configured else ""
-    render.muted(f"  {backend_name} model - blank for its default{hint}")
+    render.muted(f"{backend_name} model - blank for its default{hint}")
 
     def check(value: str) -> str:
         wanted = (value or "").strip()
@@ -552,7 +552,8 @@ def _forget(session, wf: Workflow, drop_logs: bool, drop_worktree: bool) -> None
 
 
 def cmd_backends(session, command: Command) -> None:
-    render.out(render.backend_table(config.load_backends()))
+    # wide: five columns fold into an unreadable stack inside the frame.
+    render.out(render.backend_table(config.load_backends()), wide=True)
     render.muted(
         f"edit {config.backends_path()} for anything /agents and /model "
         f"does not cover"

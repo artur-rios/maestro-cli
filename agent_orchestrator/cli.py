@@ -1,8 +1,13 @@
 """Command-line entry point.
 
-Bare invocation opens the interactive shell. Every slash command is also a
-subcommand here, so the same capabilities are available from a script or a
-one-off shell invocation:
+The orchestrator runs a coding task past three AI CLIs in turn: one writes the
+plan, one implements it on a branch, and one reviews the result and merges it.
+This module is how that is driven from a terminal.
+
+Bare invocation opens the interactive shell, which draws the work inside a
+fixed frame: a banner, a divider, output in a gutter rail, and a status line
+above the prompt. Every slash command is also a subcommand here, so the same
+capabilities are available from a script or a one-off shell invocation:
 
     orchestrator                          # the interactive shell
     orchestrator new "add rate limiting" --mode auto

@@ -99,14 +99,14 @@ def stream(wf: Workflow, roles: set[str] | None, is_running) -> None:
     scope = "all steps" if roles is None else f"the {', '.join(sorted(roles))} step"
     render.out(Rule(Text(f"end of log for {scope}", style="muted"), style="muted"))
 
-    final = Text("  ")
+    final = Text()
     final.append(wf.id[:6], style="id")
     final.append(" is ")
     final.append_text(render.status_text(wf.status))
     render.out(final)
     if wf.message:
         style = "error" if wf.status is Status.FAILED else "muted"
-        render.out(Text(f"  {wf.message}", style=style))
+        render.out(Text(wf.message, style=style))
     for note in wf.notes:
         render.warn(f"warning: {note}")
 

@@ -9,6 +9,8 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+from rich.console import Console
+
 from agent_orchestrator import settings as settings_mod, store as store_mod
 from agent_orchestrator.models import Mode, Status, Task, Workflow
 from agent_orchestrator.shell import commands, render, repl
@@ -723,6 +725,59 @@ class StartingRuns(ShellTestCase):
         self.do("add rate limiting")
         wf = self.started()
         self.assertEqual(self.session.notices.drain([wf]), [])
+
+
+class Frame(ShellTestCase):
+    """The header stays put; the footer rides just above the prompt."""
+
+    def draw(self, fn):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            fn()
+        return ANSI.sub("", buffer.getvalue())
+
+    def test_the_header_is_the_banner_closed_off_by_a_divider(self):
+        drawn = self.draw(self.shell.header)
+        self.assertIn("AI AGENT ORCHESTRATOR", drawn)
+        self.assertIn(render._box().h * 10, drawn)
+
+    def test_the_header_no_longer_carries_the_status_bar(self):
+        self.add()
+        self.assertNotIn("1 run", self.draw(self.shell.header))
+
+    def test_the_footer_carries_the_status_bar(self):
+        self.add()
+        self.assertIn("1 run", self.draw(self.shell.footer))
+
+    def test_the_footer_is_not_replayed_into_the_content_area(self):
+        """Otherwise the status line marches down the screen on each redraw."""
+        self.add()
+        with redirect_stdout(io.StringIO()):
+            # The loop's order: draw the footer, then clear the recording so
+            # the turn starts on a clean slate, then run the command.
+            self.shell.footer()
+            render.take_output()
+            render.out("the result of a command")
+            replayed = ANSI.sub("", render.take_output())
+
+        self.assertIn("the result of a command", replayed)
+        self.assertNotIn("1 run", replayed)
+
+    def sized(self, height):
+        console = Console(theme=render.THEME, file=io.StringIO(), width=100,
+                          height=height, force_terminal=False,
+                          legacy_windows=False, record=True, highlight=False)
+        return mock.patch.object(render, "console", console)
+
+    def test_output_room_leaves_space_for_the_footer(self):
+        with self.sized(40):
+            room = self.shell.output_room()
+        chrome = len(render.WORDMARK) + 3 + 2 + 3 + 1
+        self.assertEqual(room, 40 - chrome)
+
+    def test_a_short_terminal_still_gets_some_room(self):
+        with self.sized(5):
+            self.assertGreaterEqual(self.shell.output_room(), 4)
 
 
 class Notices(unittest.TestCase):
