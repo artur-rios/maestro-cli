@@ -412,8 +412,12 @@ class Prompts(ShellTestCase):
         self.assertIn("no such directory", str(ctx.exception))
 
 
-class StartingRuns(ShellTestCase):
-    """Typing a task is the primary action, so it gets the closest look."""
+class TaskStartTestCase(ShellTestCase):
+    """A session where typing a task reaches a fake git and fake backends.
+
+    Carries no tests of its own so other suites can build on it without
+    dragging this one's cases along.
+    """
 
     def setUp(self):
         super().setUp()
@@ -441,6 +445,10 @@ class StartingRuns(ShellTestCase):
         self.session.runner.start.assert_called_once()
         return self.session.runner.start.call_args.args[0]
 
+
+class StartingRuns(TaskStartTestCase):
+    """Typing a task is the primary action, so it gets the closest look."""
+
     def test_typing_a_task_starts_a_workflow(self):
         out = self.do("add rate limiting to the API")
         wf = self.started()
@@ -451,7 +459,8 @@ class StartingRuns(ShellTestCase):
     def test_the_summary_is_shown_before_it_runs(self):
         out = self.do("add rate limiting")
         self.assertIn("feature/add", out)
-        self.assertIn("claude -> opencode -> codex", out)
+        for cell in ("plan", "execute", "review", "merge", "claude", "codex"):
+            self.assertIn(cell, out)
         self.assertIn("supervised", out)
 
     def test_declining_the_confirmation_starts_nothing(self):

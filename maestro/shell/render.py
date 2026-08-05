@@ -22,7 +22,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from ..models import Status, Step, Workflow
+from ..models import Role, Status, Step, Workflow
 
 THEME = Theme(
     {
@@ -450,18 +450,19 @@ def run_detail(wf: Workflow, is_running) -> list[RenderableType]:
     facts.add_row("branch", f"{wf.branch or '-'}  [muted]base {wf.base_branch}[/]")
     facts.add_row("repo", wf.repo_path)
 
-    agents = (
-        f"{wf.agents.get('plan')} -> {wf.agents.get('execute')}"
-        f" -> {wf.agents.get('review')}"
+    agents = "  ".join(
+        f"{role.value} {wf.agent_for(role)}" for role in wf.active_roles
     )
     chosen = ", ".join(f"{r} {m}" for r, m in wf.models.items() if m)
     if chosen:
         agents += f"  [muted]({chosen})[/]"
     facts.add_row("agents", agents)
+    rounds = (
+        f"   round {wf.round}/{wf.max_rounds}" if wf.runs(Role.REVIEW) else ""
+    )
     facts.add_row(
         "mode",
-        f"{wf.mode.value}   round {wf.round}/{wf.max_rounds}"
-        f"   {wf.max_attempts} attempts/step",
+        f"{wf.mode.value}{rounds}   {wf.max_attempts} attempts/step",
     )
     if wf.prompt_source:
         facts.add_row("source", wf.prompt_source)
@@ -636,6 +637,72 @@ def merge_preview(wf: Workflow, diffstat: str) -> RenderableType:
     return Group(*parts)
 
 
+#: How the merge is reached, written under the last cell of the diagram.
+_MERGE_CAPTION = {"supervised": "you approve", "autonomous": "automatic"}
+
+
+def workflow_steps(agents: dict[str, str], mode: str) -> list[tuple[str, str]]:
+    """The cells of the diagram: the steps that will run, then the merge.
+
+    A step the user turned off is simply not here. Showing it greyed out would
+    ask the reader to work out what is going to happen; this way the picture
+    is the run.
+    """
+    cells = [
+        (role, agents.get(role) or "")
+        for role in ("plan", "execute", "review")
+        if agents.get(role)
+    ]
+    cells.append(("merge", _MERGE_CAPTION.get(mode, mode)))
+    return cells
+
+
+def workflow_diagram(agents: dict[str, str], mode: str,
+                     term_width: int | None = None) -> RenderableType:
+    """The workflow as a row of boxes, one per step, with its agent beneath.
+
+    A run's shape is the thing worth checking before it starts -- especially
+    now that steps can be left out -- and a picture answers that faster than a
+    line of arrows does.
+    """
+    cells = workflow_steps(agents, mode)
+    box = _box()
+    arrow = " -> " if box.plain else " ──▶ "
+    available = term_width if term_width is not None else content_width()
+
+    #: Inner width of each cell; the two border characters sit outside it.
+    widths = [max(len(role), len(caption)) + 2 for role, caption in cells]
+    drawn = sum(width + 2 for width in widths) + len(arrow) * (len(cells) - 1)
+    if drawn > available:
+        # Too narrow for boxes; the same run as one line rather than a
+        # diagram folded into nonsense.
+        line = Text()
+        for index, (role, caption) in enumerate(cells):
+            if index:
+                line.append(arrow, style="muted")
+            line.append(role, style="heading")
+            if caption:
+                line.append(f" {caption}", style="muted")
+        return line
+
+    top, middle, bottom, under = Text(), Text(), Text(), Text()
+    for index, (role, caption) in enumerate(cells):
+        if index:
+            for line, filler in ((top, " " * len(arrow)), (middle, arrow),
+                                 (bottom, " " * len(arrow)),
+                                 (under, " " * len(arrow))):
+                line.append(filler, style="muted")
+        span = widths[index]
+        top.append(f"{box.tl}{box.h * span}{box.tr}", style="muted")
+        middle.append(box.v, style="muted")
+        middle.append(f"{role:^{span}}", style="heading")
+        middle.append(box.v, style="muted")
+        bottom.append(f"{box.bl}{box.h * span}{box.br}", style="muted")
+        under.append(f" {caption:^{span}} ", style="muted")
+
+    return Group(top, middle, bottom, under)
+
+
 def summary_panel(
     branch: str,
     agents: dict[str, str],
@@ -651,17 +718,24 @@ def summary_panel(
     body.add_column()
 
     body.add_row("branch", f"[heading]{branch}[/]")
-    line = f"{agents['plan']} -> {agents['execute']} -> {agents['review']}"
+    # The panel's border, its padding and the label column all eat into what
+    # the diagram may use, so it is told what is left rather than the width of
+    # the screen.
+    body.add_row("steps", workflow_diagram(agents, mode, content_width() - 12))
+
     chosen = {role: name for role, name in (models or {}).items() if name}
     if chosen:
-        line += "  [muted](" + ", ".join(
+        body.add_row("models", "[muted]" + ", ".join(
             f"{role} {name}" for role, name in chosen.items()
-        ) + ")[/]"
-    body.add_row("agents", line)
-    body.add_row(
-        "run",
-        f"{mode}  [muted]|[/]  {plural(rounds, 'round')}, {attempts} attempts/step",
-    )
+        ) + "[/]")
+
+    run = f"{mode}  [muted]|[/]  {attempts} attempts/step"
+    if agents.get("review"):
+        run = (
+            f"{mode}  [muted]|[/]  {plural(rounds, 'round')}, "
+            f"{attempts} attempts/step"
+        )
+    body.add_row("run", run)
     if source:
         body.add_row("from", f"[muted]{source}[/]")
 

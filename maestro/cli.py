@@ -1,7 +1,8 @@
 """Command-line entry point.
 
-Maestro runs a coding task past three AI CLIs in turn: one writes the
-plan, one implements it on a branch, and one reviews the result and merges it.
+Maestro runs a coding task past up to three AI CLIs in turn: one writes the
+plan, one implements it on a branch, and one reviews the result before it is
+merged. You decide which of them a run uses, or leave the choices to Maestro.
 This module is how that is driven from a terminal.
 
 Bare invocation opens the interactive shell, which draws the work inside a
@@ -59,8 +60,9 @@ def _run(handler, session, *args: str) -> int:
               help="Repository to act on. Defaults to the working directory.")
 @click.pass_context
 def cli(ctx: click.Context, repo: str | None) -> None:
-    """Orchestrate AI coding agents: one plans, one executes, one reviews and merges.
+    """Conduct AI coding agents: one plans, one executes, one reviews and merges.
 
+    Plan and review are optional; execute is the step that does the work.
     Run without a subcommand to open the interactive shell.
     """
     ctx.ensure_object(dict)
@@ -71,9 +73,9 @@ def cli(ctx: click.Context, repo: str | None) -> None:
 
 @cli.command("new", context_settings=CONTEXT)
 @click.argument("task", nargs=-1, required=True)
-@click.option("--plan", help="Backend that writes the plan.")
-@click.option("--execute", help="Backend that implements it.")
-@click.option("--review", help="Backend that reviews and merges.")
+@click.option("--plan", help="Backend that writes the plan, or 'off' to skip it.")
+@click.option("--execute", help="Backend that implements it. Always runs.")
+@click.option("--review", help="Backend that reviews it, or 'off' to skip it.")
 @click.option("--model", help="Model for every role.")
 @click.option("--plan-model", help="Model for the plan step only.")
 @click.option("--execute-model", help="Model for the execute step only.")

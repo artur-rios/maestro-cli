@@ -118,12 +118,14 @@ class EndToEnd(unittest.TestCase):
             capture_output=True, text=True, check=True,
         ).stdout.strip()
 
-    def make(self, mode):
+    def make(self, mode, **agents):
+        staffing = {"plan": "fake", "execute": "fake", "review": "fake"}
+        staffing.update(agents)
         wf = Workflow(
             prompt="add a greeting file",
             repo_path=str(self.repo),
             base_branch="main",
-            agents={"plan": "fake", "execute": "fake", "review": "fake"},
+            agents=staffing,
             mode=mode,
         )
         self.store.add(wf)
@@ -145,6 +147,31 @@ class EndToEnd(unittest.TestCase):
 
         for step in wf.steps:
             self.assertTrue(Path(step.log_path).exists())
+
+    def test_one_agent_alone_can_land_the_change(self):
+        """Plan and review off: the shortest workflow there is."""
+        wf = self.make(Mode.AUTONOMOUS, plan="", review="")
+        self.runner._run(wf, threading.Event())
+
+        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
+        self.assertEqual([s.role.value for s in wf.steps], ["execute"])
+        self.assertEqual(wf.plan_text, "")
+        self.assertIsNone(wf.verdict)
+        self.assertEqual((self.repo / "greeting.txt").read_text().strip(), "hello")
+
+    def test_a_run_without_a_reviewer_still_stops_at_the_gate(self):
+        wf = self.make(Mode.SUPERVISED, review="")
+        self.runner._run(wf, threading.Event())
+
+        self.assertIs(wf.status, Status.AWAITING_APPROVAL, msg=wf.message)
+        self.assertFalse((self.repo / "greeting.txt").exists())
+        self.assertIn("greeting.txt", gitops.diffstat(self.repo, "main", wf.branch))
+
+        self.runner.approve(wf)
+        self.runner._threads[wf.id].join(timeout=60)
+
+        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
+        self.assertTrue((self.repo / "greeting.txt").exists())
 
     def test_supervised_workflow_does_not_touch_main_until_approved(self):
         wf = self.make(Mode.SUPERVISED)

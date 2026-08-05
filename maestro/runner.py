@@ -1,6 +1,7 @@
 """The workflow state machine.
 
-One background thread per workflow walks it through plan, execute, review and
+One background thread per workflow walks it through the steps it was given:
+execute always, plan and review when the run has an agent for them, then the
 merge. This is the only module that mutates workflow state; everything else
 reads it.
 """
@@ -249,10 +250,11 @@ class Runner:
             if self._cancelled(wf, cancel, pause):
                 return
 
-            # Plan only when there isn't one. Replanning on a resume would
-            # throw away the checklist along with everything already ticked
-            # off it, and re-do work that is committed.
-            if not wf.plan_text:
+            # Plan only when the run has a planning agent and there isn't a
+            # plan yet. Replanning on a resume would throw away the checklist
+            # along with everything already ticked off it, and re-do work that
+            # is committed.
+            if wf.runs(Role.PLAN) and not wf.plan_text:
                 if not self._plan_stage(wf):
                     return
 
@@ -264,6 +266,11 @@ class Runner:
                     return
                 if self._cancelled(wf, cancel, pause):
                     return
+
+                # Without a reviewer there is nothing to send the work back,
+                # so the first pass is the last one.
+                if not wf.runs(Role.REVIEW):
+                    break
 
                 verdict = self._review_stage(wf)
                 if verdict is None:
@@ -283,8 +290,13 @@ class Runner:
                 self._touch(wf)
 
             if wf.mode is Mode.SUPERVISED:
+                why = (
+                    "approved by reviewer"
+                    if wf.runs(Role.REVIEW)
+                    else "the work is committed"
+                )
                 self._set_status(
-                    wf, Status.AWAITING_APPROVAL, "approved by reviewer - awaiting your confirmation"
+                    wf, Status.AWAITING_APPROVAL, f"{why} - awaiting your confirmation"
                 )
                 return
 
@@ -356,7 +368,7 @@ class Runner:
         if not wf.tasks:
             return self._attempt(
                 wf,
-                what="implement the plan",
+                what="implement the plan" if wf.plan_text else "carry out the task",
                 first_prompt=prompts.execute_prompt(wf, ""),
                 commit_message=f"maestro: round {wf.round} changes",
             )

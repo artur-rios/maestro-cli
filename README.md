@@ -1,9 +1,14 @@
 # Maestro
 
-A prompt-driven shell for building agent workflows. You type a task; it decides
-which AI CLI **plans**, which **executes**, and which **reviews and merges**,
-then runs the whole thing on a branch in the background. The same CLI can fill
-all three roles.
+A prompt-driven shell for building agent workflows. You type a task; one AI CLI
+**plans** it, another **executes** it, a third **reviews** it, and the result
+is merged -- all on a branch, in the background.
+
+Who fills those roles is yours to say. Name an agent per role and Maestro uses
+it; leave a role unset and it picks one for you; set your choices once with
+`/set` and they become the default for every run. **Plan and review are
+optional** -- turn either off and the run is shorter. Execute is the step that
+does the work, so it always runs. The same CLI can fill all three roles.
 
 ```bash
 pip install -r requirements.txt
@@ -29,9 +34,15 @@ pip install -e .
   3 runs  1 awaiting approval  /help for commands
 
 > add rate limiting to the scope endpoints
-  feature/rate-limiting-scope-endpoints
-  claude -> opencode -> codex  |  supervised  |  2 rounds, 3 attempts/step
-  Enter to run, c to change, n to cancel:
+  ╭─ about to run ───────────────────────────────────────────────────────────────╮
+  │ branch  feature/rate-limiting-scope-endpoints                                │
+  │ steps   ╭────────╮     ╭──────────╮     ╭────────╮     ╭─────────────╮       │
+  │         │  plan  │ ──▶ │ execute  │ ──▶ │ review │ ──▶ │    merge    │       │
+  │         ╰────────╯     ╰──────────╯     ╰────────╯     ╰─────────────╯       │
+  │           claude         opencode         codex          you approve         │
+  │ run     supervised  |  2 rounds, 3 attempts/step                             │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  Start this run? [run/change/cancel]:
 
   started 7f2a1c
   following - Ctrl-C returns to the prompt
@@ -156,18 +167,25 @@ when exactly one run is waiting.
 
 ## Choosing what runs
 
-Every run is summarised before it starts, and `c` opens it up. Each question
-offers the current value; pressing Enter keeps it:
+Every run is drawn before it starts -- the steps it will take, in order, with
+the agent under each one -- and `change` opens it up. Each question offers the
+current value; pressing Enter keeps it:
 
 ```
 > add rate limiting to the scope endpoints
-  feature/rate-limiting-scope-endpoints
-  claude -> opencode -> codex  |  supervised  |  2 rounds, 3 attempts/step
-  Enter to run, c to change, n to cancel: c
+  ╭─ about to run ───────────────────────────────────────────────────────────────╮
+  │ branch  feature/rate-limiting-scope-endpoints                                │
+  │ steps   ╭────────╮     ╭──────────╮     ╭────────╮     ╭─────────────╮       │
+  │         │  plan  │ ──▶ │ execute  │ ──▶ │ review │ ──▶ │    merge    │       │
+  │         ╰────────╯     ╰──────────╯     ╰────────╯     ╰─────────────╯       │
+  │           claude         opencode         codex          you approve         │
+  │ run     supervised  |  2 rounds, 3 attempts/step                             │
+  ╰──────────────────────────────────────────────────────────────────────────────╯
+  Start this run? [run/change/cancel]: change
 
   Enter keeps the value shown.
   available: claude, codex, opencode
-  plan agent [claude]:
+  plan agent [claude]:  (claude, codex, opencode, skip this step)
     claude model - blank for its default
   plan model []: opus-4.6
   execute agent [opencode]:
@@ -184,8 +202,13 @@ offers the current value; pressing Enter keeps it:
   Save these as your defaults? [y/N]
 ```
 
-Each role is asked for its agent and then that agent's model, and the model is
-always chosen from a list. opencode enumerates its own 42; claude and codex
+Each role is asked for its agent and then that agent's model. The plan and
+review lists carry *skip this step* at the end; the execute list does not,
+because that is the step that does the work. A skipped step is asked no model
+question and drops out of the diagram, so the summary that reappears is the run
+you are about to get.
+
+The model is always chosen from a list. opencode enumerates its own 42; claude and codex
 cannot -- `claude` has no list command and `codex models` insists on a terminal
 -- so they fall back to `known_models` in `backends.json`, seeded with claude's
 aliases (`fable`, `opus`, `sonnet`, `haiku`) and editable for the ids you use.
@@ -202,6 +225,69 @@ the next run starts from them. Answering no uses them for this run only.
 
 `/set confirm off` skips the whole exchange and runs immediately on defaults.
 
+## Steps you can leave out
+
+Not every task wants three agents. A one-line fix does not need a plan written
+for it, and work you are going to read yourself does not need a review. Either
+step can be turned off with `off` in place of an agent name -- `none`, `no`,
+`skip` and `-` mean the same thing:
+
+```
+fix the flaky checkout test --plan off        # straight to the work
+add rate limiting --review off                # nobody grades it
+/set plan off                                 # every run from now on
+/set review claude                            # and back again
+```
+
+The diagram tells you what you asked for:
+
+```
+╭─ about to run ───────────────────────────────────────────────────────────────╮
+│ branch  fix/flaky-checkout-test                                              │
+│ steps   ╭─────────╮     ╭────────╮     ╭───────────╮                         │
+│         │ execute │ ──▶ │ review │ ──▶ │   merge   │                         │
+│         ╰─────────╯     ╰────────╯     ╰───────────╯                         │
+│            codex          claude         automatic                           │
+│ run     autonomous  |  2 rounds, 3 attempts/step                             │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+**Execute cannot be turned off**, and asking is refused rather than quietly
+ignored: it is the step that changes the files, and a run without it would
+create a branch and merge nothing. That leaves the shortest possible workflow
+at one agent:
+
+```
+╭─ about to run ───────────────────────────────────────────────────────────────╮
+│ branch  fix/typo                                                             │
+│ steps   ╭─────────╮     ╭───────────╮                                        │
+│         │ execute │ ──▶ │   merge   │                                        │
+│         ╰─────────╯     ╰───────────╯                                        │
+│           claude          automatic                                          │
+│ run     autonomous  |  3 attempts/step                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+What changes downstream follows from the picture rather than from a special
+case:
+
+- **No plan step.** Nothing is planned and no checklist is parsed, so the
+  execute agent gets the task itself, is told plainly that this run has no
+  planning step, and works out the approach from the repository's own
+  conventions. It implements the whole task in one pass instead of item by
+  item, and the resume-until-committed behaviour is unchanged.
+- **No review step.** Nothing produces a verdict, so there is no rework loop
+  and the round count stops being asked for. A supervised run still stops at
+  the merge gate for you -- `/approve` shows the diff, which is the review.
+  An autonomous run merges as soon as the work is committed.
+- **The agents are told the truth about who else is on the run.** A single
+  agent is not addressed as one of three; that framing had it waiting for a
+  plan that was never coming, or leaving the checking to a reviewer that did
+  not exist.
+
+Blank is not the same as `off`. An unset role means *pick one for me* -- the
+first installed CLI takes it -- while `off` means the step does not happen.
+
 ## Tuning a single run
 
 Flags after the task skip straight past the questions for that value, apply to
@@ -210,6 +296,7 @@ that run only, and never change your defaults:
 ```
 fix the flaky checkout test --execute codex --mode auto
 @scope-spec --repo ../other-api --branch fix/scope-lookup --attempts 5
+add rate limiting --plan off --review codex
 ```
 
 `--plan --execute --review --model --plan-model --execute-model --review-model
@@ -229,6 +316,7 @@ Persistent defaults live in `/config` and are changed with `/set`:
 ```
 /set mode autonomous      /set execute opencode      /set attempts 5
 /set repo D:\code\api     /set confirm off           /set follow off
+/set plan off             /set review claude
 /set execute_model opencode-go/glm-5.2
 ```
 
@@ -269,7 +357,7 @@ the workflow so `/show` says where the task came from.
 
 ```
 prompt -> plan -> execute -> review -> merge
-                    ^          |
+          (opt)     ^          | (opt)
                     +----------+  rework, up to N rounds
 ```
 
@@ -285,6 +373,12 @@ prompt -> plan -> execute -> review -> merge
 5. On rejection, the feedback goes back to the execute agent and the cycle
    repeats until the round limit runs out.
 6. On approval, the branch is merged with `git merge --no-ff`.
+
+Steps 2 and 4 run only when the run has an agent for them; see [Steps you can
+leave out](#steps-you-can-leave-out). Without step 2 there is no checklist, so
+step 3 is a single pass over the whole task; without step 4 there is no
+verdict, so step 5 never happens and the run goes to the merge gate as soon as
+the work is committed.
 
 ### One item at a time, and finishing what was started
 
@@ -400,7 +494,9 @@ prompt.
 | **Autonomous** | The reviewer's approval merges straight into the base branch, with no human step. |
 
 A reviewer whose output cannot be parsed counts as *request changes*, so an
-ambiguous review never merges on its own.
+ambiguous review never merges on its own. With the review step turned off there
+is no verdict to weigh: a supervised run stops at the gate for you to read the
+diff, and an autonomous one merges as soon as the work is committed.
 
 ### Reading logs
 
@@ -638,6 +734,6 @@ unmodified.
 python -m unittest discover -s tests -t .
 ```
 
-456 tests. The unit tests fake git and the CLIs; the integration tests drive a
+511 tests. The unit tests fake git and the CLIs; the integration tests drive a
 real git repository with a stub agent script, so the suite needs no AI tool
 installed.

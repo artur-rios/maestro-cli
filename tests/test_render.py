@@ -92,7 +92,9 @@ class RunDetail(unittest.TestCase):
         wf.prompt_source = "docs/prompts/spec.md"
         out = self.render_all(wf)
         self.assertIn("feature/rate-limiting", out)
-        self.assertIn("claude -> opencode -> codex", out)
+        self.assertIn("plan claude", out)
+        self.assertIn("execute opencode", out)
+        self.assertIn("review codex", out)
         self.assertIn("glm-5.2", out)
         self.assertIn("autonomous", out)
         self.assertIn("docs/prompts/spec.md", out)
@@ -149,7 +151,10 @@ class Summary(unittest.TestCase):
     def test_it_shows_what_will_happen(self):
         out = self.panel()
         self.assertIn("feature/thing", out)
-        self.assertIn("claude -> opencode -> codex", out)
+        for cell in ("plan", "execute", "review", "merge"):
+            self.assertIn(cell, out)
+        for agent in ("claude", "opencode", "codex"):
+            self.assertIn(agent, out)
         self.assertIn("supervised", out)
         self.assertIn("2 rounds", out)
 

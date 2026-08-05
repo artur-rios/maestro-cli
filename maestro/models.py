@@ -14,11 +14,20 @@ from typing import Any
 
 
 class Role(str, Enum):
-    """The three jobs an agent can be assigned in a workflow."""
+    """The three jobs an agent can be assigned in a workflow.
+
+    Only EXECUTE is compulsory: a workflow with no plan agent goes straight to
+    the work, and one with no review agent stops asking for a verdict. An
+    unfilled role is stored as an empty agent name.
+    """
 
     PLAN = "plan"
     EXECUTE = "execute"
     REVIEW = "review"
+
+
+#: The order the roles run in.
+ROLE_ORDER = (Role.PLAN, Role.EXECUTE, Role.REVIEW)
 
 
 class Mode(str, Enum):
@@ -137,7 +146,12 @@ class Step:
 
 @dataclass
 class Workflow:
-    """A single prompt driven through plan, execute, review and merge."""
+    """A single prompt driven through plan, execute, review and merge.
+
+    Which of those steps actually run is the user's choice, recorded in
+    `agents`: a role with no agent is skipped. Execution always runs, so a
+    workflow is at minimum "implement this, then merge it".
+    """
 
     prompt: str
     repo_path: str
@@ -176,7 +190,17 @@ class Workflow:
     round: int = 1
 
     def agent_for(self, role: Role) -> str:
-        return self.agents[role.value]
+        """Who fills this role, or "" when the step was turned off."""
+        return self.agents.get(role.value, "") or ""
+
+    def runs(self, role: Role) -> bool:
+        """Whether this step is part of the workflow at all."""
+        return role is Role.EXECUTE or bool(self.agent_for(role))
+
+    @property
+    def active_roles(self) -> list[Role]:
+        """The steps this run will actually take, in order."""
+        return [role for role in ROLE_ORDER if self.runs(role)]
 
     def model_for(self, role: Role) -> str:
         return self.models.get(role.value, "")

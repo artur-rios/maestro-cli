@@ -15,6 +15,12 @@ from . import config
 
 SETTINGS_FILE = "settings.json"
 
+#: What a user types to leave the plan or review step out of a run. Stored as
+#: OFF, which is why "" cannot serve: an empty agent means "work it out at
+#: launch", and a skipped step has to be told apart from an unset one.
+OFF = "off"
+OFF_WORDS = frozenset({OFF, "none", "no", "skip", "-"})
+
 #: Empty strings mean "work it out at launch": the repo becomes the working
 #: directory, and each role becomes the first installed backend.
 DEFAULTS: dict[str, Any] = {
@@ -42,9 +48,9 @@ DEFAULTS: dict[str, Any] = {
 #: Keys `/set` accepts, with how to read the typed value.
 EDITABLE: dict[str, str] = {
     "repo": "path",
-    "plan": "text",
-    "execute": "text",
-    "review": "text",
+    "plan": "optional_agent",
+    "execute": "required_agent",
+    "review": "optional_agent",
     "plan_model": "text",
     "execute_model": "text",
     "review_model": "text",
@@ -110,7 +116,21 @@ def coerce(key: str, raw: str) -> Any:
         return normalise_mode(value)
     if kind == "path":
         return str(Path(value).expanduser()) if value else ""
+    if kind == "optional_agent":
+        return OFF if is_off(value) else value
+    if kind == "required_agent":
+        if is_off(value):
+            raise SettingsError(
+                "the execute step cannot be skipped - it is the one that does "
+                "the work"
+            )
+        return value
     return value
+
+
+def is_off(value: str) -> bool:
+    """Whether a typed agent name means "leave this step out"."""
+    return (value or "").strip().lower() in OFF_WORDS
 
 
 def normalise_mode(value: str) -> str:

@@ -78,8 +78,30 @@ def conventions(workflow: Workflow, may_edit: bool) -> str:
     return "\n".join(lines)
 
 
+def framing(workflow: Workflow) -> str:
+    """How the agent is told the run is staffed.
+
+    An agent that is told it is one of three, when the user turned two of the
+    steps off, will wait for a plan that is never coming or leave the checking
+    to a reviewer that does not exist.
+    """
+    return {1: "a single-agent", 2: "a two-agent"}.get(
+        len(workflow.active_roles), "a three-agent"
+    )
+
+
+def plan_section(workflow: Workflow, heading: str) -> str:
+    """The agreed plan, or a note that this run has no planning step."""
+    if workflow.plan_text:
+        return f"{heading}\n\n{workflow.plan_text}\n"
+    return (
+        "This run has no planning step: work out the approach yourself from "
+        "the task and\nthe repository's own conventions.\n"
+    )
+
+
 def plan_prompt(workflow: Workflow) -> str:
-    return f"""You are the PLANNING agent in a three-agent workflow.
+    return f"""You are the PLANNING agent in {framing(workflow)} workflow.
 
 Task from the user:
 {workflow.prompt}
@@ -121,21 +143,18 @@ A previous attempt was reviewed and rejected. Address this feedback:
 {feedback}
 """
 
-    return f"""You are the EXECUTION agent in a three-agent workflow.
+    return f"""You are the EXECUTION agent in {framing(workflow)} workflow.
 
 Task from the user:
 {workflow.prompt}
 
-The planning agent produced this plan:
-
-{workflow.plan_text}
-{revision}
+{plan_section(workflow, "The planning agent produced this plan:")}{revision}
 You are in a git worktree on branch '{workflow.branch}'.
 
 {conventions(workflow, may_edit=True)}
 
-Implement the plan: make the changes, run the project's tests if it has any,
-and commit your work with a clear message.
+Do the work: make the changes, run the project's tests if it has any, and
+commit your work with a clear message.
 """
 
 
@@ -145,15 +164,12 @@ def task_prompt(workflow: Workflow, task: Task) -> str:
         f"  {'[x]' if t.status is Status.DONE else '[ ]'} {t.index}. {t.text}"
         for t in workflow.tasks
     )
-    return f"""You are the EXECUTION agent in a three-agent workflow.
+    return f"""You are the EXECUTION agent in {framing(workflow)} workflow.
 
 Overall task from the user:
 {workflow.prompt}
 
-The agreed plan:
-
-{workflow.plan_text}
-
+{plan_section(workflow, "The agreed plan:")}
 Checklist ({workflow.task_progress} done):
 {checklist}
 
@@ -181,16 +197,13 @@ def continue_prompt(workflow: Workflow, what: str, state: str) -> str:
     rather than at a saved session. That keeps this working identically across
     CLIs and safe when several workflows run at once.
     """
-    return f"""You are the EXECUTION agent in a three-agent workflow, resuming
-work you did not finish.
+    return f"""You are the EXECUTION agent in {framing(workflow)} workflow,
+resuming work you did not finish.
 
 Overall task from the user:
 {workflow.prompt}
 
-The agreed plan:
-
-{workflow.plan_text}
-
+{plan_section(workflow, "The agreed plan:")}
 You were asked to do this:
 
     {what}
@@ -210,15 +223,12 @@ the change; do not merely describe it.
 
 
 def review_prompt(workflow: Workflow, diff_text: str) -> str:
-    return f"""You are the REVIEW agent in a three-agent workflow.
+    return f"""You are the REVIEW agent in {framing(workflow)} workflow.
 
 Original task from the user:
 {workflow.prompt}
 
-The plan that was agreed:
-
-{workflow.plan_text}
-
+{plan_section(workflow, "The plan that was agreed:")}
 Here is the complete diff of branch '{workflow.branch}' against
 '{workflow.base_branch}':
 

@@ -21,6 +21,9 @@ from .render import console
 #: Offered at the end of every model list, for an id not on it.
 OTHER_MODEL = "other (type it)"
 
+#: Offered at the end of the plan and review agent lists.
+SKIP_STEP = "skip this step"
+
 
 class CommandError(Exception):
     """Anything the user should see as one line, not a traceback."""
@@ -57,10 +60,22 @@ def _installed(name: str) -> bool:
 
 
 def resolve_agents(session, overrides: dict) -> dict[str, str]:
-    """Which backend fills each role, after settings and inline flags."""
+    """Which backend fills each role, after settings and inline flags.
+
+    An empty name means the step was turned off, which only plan and review
+    may be: without the execute step there is no run.
+    """
     chosen: dict[str, str] = {}
     for role in ("plan", "execute", "review"):
         name = str(overrides.get(role) or session.settings.get(role) or "").strip()
+        if settings_mod.is_off(name):
+            if role == "execute":
+                raise CommandError(
+                    "the execute step cannot be skipped - it is the one that "
+                    "does the work"
+                )
+            chosen[role] = ""
+            continue
         if not name:
             name = session.default_backend()
         if not name:
@@ -136,6 +151,7 @@ def _defaulted_run(session, prompt: str, overrides: dict, repo) -> dict:
     else:
         branch = gitops.suggest_branch(prompt, branch_type)
 
+    agents = resolve_agents(session, overrides)
     every = str(overrides.get("model") or "")
     models = {
         role: str(
@@ -143,12 +159,12 @@ def _defaulted_run(session, prompt: str, overrides: dict, repo) -> dict:
             or every
             or session.settings.get(f"{role}_model")
             or ""
-        )
+        ) if agents[role] else ""
         for role in ("plan", "execute", "review")
     }
 
     return {
-        "agents": resolve_agents(session, overrides),
+        "agents": agents,
         "models": models,
         "mode": str(overrides.get("mode") or session.settings.get("mode")),
         "rounds": int(overrides.get("rounds") or session.settings.get("rounds")),
@@ -202,28 +218,38 @@ def _edit_run(session, plan: dict, repo) -> dict:
         ("execute", "execute agent"),
         ("review", "review agent"),
     ):
+        optional = role != "execute"
+        # Plan and review may be left out, so their picker carries the way to
+        # do it; execute is the step that does the work and has no such entry.
+        options = [*installed, SKIP_STEP] if optional and installed else installed
+        current = agents[role] or (SKIP_STEP if optional else "")
         chosen = (
-            session.ask_select(label, installed, agents[role])
-            if installed else agents[role]
+            session.ask_select(label, options, current) if options else current
         )
         try:
             # A picker cannot offer a bad value, but a typed fallback can.
-            agents[role] = _valid_agent(chosen, installed)
+            agents[role] = _valid_agent(chosen, installed, optional)
         except ValueError as exc:
             render.error(str(exc))
             agents[role] = _ask_until(
-                session, label, agents[role], lambda v: _valid_agent(v, installed)
+                session, label, current,
+                lambda v: _valid_agent(v, installed, optional),
             )
-        models[role] = _ask_model(session, agents[role], label, models.get(role, ""))
+        models[role] = (
+            _ask_model(session, agents[role], label, models.get(role, ""))
+            if agents[role] else ""
+        )
     plan["agents"] = agents
     plan["models"] = models
 
     plan["mode"] = settings_mod.normalise_mode(
         session.ask_select("mode", ["supervised", "autonomous"], plan["mode"])
     )
-    plan["rounds"] = _ask_until(
-        session, "rework rounds", str(plan["rounds"]), _positive
-    )
+    # Rounds only mean something when a reviewer can send the work back.
+    if agents["review"]:
+        plan["rounds"] = _ask_until(
+            session, "rework rounds", str(plan["rounds"]), _positive
+        )
     plan["attempts"] = _ask_until(
         session, "attempts per step", str(plan["attempts"]), _positive
     )
@@ -304,10 +330,17 @@ def _ask_until(session, label: str, default: str, check):
             render.error(str(exc))
 
 
-def _valid_agent(value: str, installed: list[str]) -> str:
+def _valid_agent(value: str, installed: list[str], optional: bool = False) -> str:
     name = (value or "").strip()
+    if optional and (name == SKIP_STEP or settings_mod.is_off(name)):
+        return ""
     known = config.load_backends()
     if name not in known:
+        if optional:
+            raise ValueError(
+                f"unknown backend '{name}' - see /backends, or '{settings_mod.OFF}' "
+                f"to leave the step out"
+            )
         raise ValueError(f"unknown backend '{name}' - see /backends")
     if installed and name not in installed:
         raise ValueError(f"'{name}' is not installed")
@@ -332,11 +365,16 @@ def _valid_branch(value: str, repo, current: str) -> str:
 
 def _save_as_defaults(session, plan: dict) -> None:
     models = plan.get("models") or {}
+    # A skipped step is stored as OFF: blank already means "pick one for me".
+    agents = {
+        role: name or settings_mod.OFF
+        for role, name in plan["agents"].items()
+    }
     session.settings.update(
         {
-            "plan": plan["agents"]["plan"],
-            "execute": plan["agents"]["execute"],
-            "review": plan["agents"]["review"],
+            "plan": agents["plan"],
+            "execute": agents["execute"],
+            "review": agents["review"],
             "plan_model": models.get("plan", ""),
             "execute_model": models.get("execute", ""),
             "review_model": models.get("review", ""),
@@ -699,6 +737,7 @@ HELP = [
     ("<task>", "start a workflow from what you type"),
     ("@name [extra]", "start one from a saved prompt file"),
     ("--plan --execute --review", "which AI fills each role, this run only"),
+    ("--plan off  --review off", "leave that step out; execute always runs"),
     ("--mode --rounds --attempts", "autonomous or supervised, and the budgets"),
     ("--repo --base --branch", "where the work happens"),
     ("", ""),
