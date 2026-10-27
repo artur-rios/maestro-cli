@@ -1,5 +1,11 @@
 # Maestro
 
+> [!NOTE]
+> This is the real, open-source code of maestro-cli. Its home is Forgejo, at
+> https://git.techcraftsmen.net/artur-rios/maestro-cli; the copy on GitHub is a read-only mirror, for viewing only, and
+> its issues and pull requests are not followed. If you want to contribute, email me at
+> arturdev@duck.com.
+
 A prompt-driven shell for building agent workflows. You type a task; one AI CLI
 **plans** it, another **executes** it, a third **reviews** it, and the result
 is merged -- all on a branch, in the background.
