@@ -8,7 +8,7 @@ every prompt now says plainly that the project's conventions win.
 import unittest
 
 from maestro import prompts
-from maestro.models import Status, Task, Workflow
+from maestro.models import Task, Workflow
 
 
 def make(prompt="add rate limiting", instructions="", **kwargs):

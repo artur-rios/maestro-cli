@@ -447,7 +447,7 @@ class Runner:
                 return True
 
             if result.timed_out:
-                why = f"it timed out with nothing committed"
+                why = "it timed out with nothing committed"
             elif not result.ok:
                 why = f"it exited with code {result.exit_code} and committed nothing"
             else:
