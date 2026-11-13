@@ -15,7 +15,6 @@ from ..models import Mode, Role, Status, Workflow
 from . import logview, progress, promptlib, render
 from .parser import Command, TaskIntent
 from .promptlib import PromptError
-from .render import console
 
 
 #: Offered at the end of every model list, for an id not on it.

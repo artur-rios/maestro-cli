@@ -1,0 +1,17 @@
+# What Jenkins checks for this repository, read by the pipeline of the yggdrasil installation that runs it (yggdrasil's
+# docs/catalog.md, "Repository pipeline file", has every field). It is data, never code: images (pinned by version and
+# digest, which Renovate keeps up to date), commands and globs. The commands are scripts under ci/ that run from the
+# repository's root, so you can run them on your own machine too. The repository is the maestro CLI, a Python package
+# (pyproject.toml, Python 3.10+): nothing is deployed or released from it.
+#
+# Check it where the catalog is, in the yggdrasil checkout:
+#   python3 scripts/pipeline_config.py describe maestro-cli <this repository's checkout>
+
+checks:
+  lint: # ruff check, with the rules pyproject.toml selects, pinned in ci/lint.sh
+    image: python:3.13.17-bookworm@sha256:a3799099b64fd333f262768c7a64733f6e4edb7bc569813710a100214bdcf278
+    run: ci/lint.sh
+
+  build: # the sdist and wheel (python -m build), installed and started once; no tests (ci/build.sh says why)
+    image: python:3.13.17-bookworm@sha256:a3799099b64fd333f262768c7a64733f6e4edb7bc569813710a100214bdcf278
+    run: ci/build.sh

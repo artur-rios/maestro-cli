@@ -1,14 +1,13 @@
 """The rich rendering layer and the questionary prompt fallbacks."""
 
 import io
-import time
 import unittest
 from unittest import mock
 
 from rich.console import Console
 from rich.text import Text
 
-from maestro.models import Mode, Status, Step, Role, Task, Workflow
+from maestro.models import Mode, Status, Role, Task, Workflow
 import re
 
 from maestro.shell import prompts, render
