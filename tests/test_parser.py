@@ -1,6 +1,6 @@
 """Turning a typed line into an intent."""
 
-import unittest
+import pytest
 
 from maestro.shell.parser import (
     Command,
@@ -10,132 +10,134 @@ from maestro.shell.parser import (
 )
 
 
-class Blanks(unittest.TestCase):
-    def test_nothing_typed_is_nothing_to_do(self):
-        for line in ("", "   ", "\t", None):
-            self.assertIsNone(parse(line))
+@pytest.mark.parametrize("line", ["", "   ", "\t", None])
+def test_given_a_blank_line_when_parsed_then_there_is_nothing_to_do(line):
+    assert parse(line) is None
 
 
-class Commands(unittest.TestCase):
-    def test_a_slash_makes_a_command(self):
+class TestCommands:
+    def test_given_a_slash_when_parsed_then_it_is_a_command(self):
         result = parse("/runs")
-        self.assertIsInstance(result, Command)
-        self.assertEqual(result.name, "runs")
-        self.assertEqual(result.args, [])
+        assert isinstance(result, Command)
+        assert result.name == "runs"
+        assert result.args == []
 
-    def test_arguments_are_split(self):
+    def test_given_arguments_when_parsed_then_they_are_split(self):
         result = parse("/show 7f2a1c")
-        self.assertEqual(result.name, "show")
-        self.assertEqual(result.args, ["7f2a1c"])
+        assert result.name == "show"
+        assert result.args == ["7f2a1c"]
 
-    def test_the_name_is_case_insensitive(self):
-        self.assertEqual(parse("/RUNS").name, "runs")
+    def test_given_an_upper_case_name_when_parsed_then_it_is_lowered(self):
+        assert parse("/RUNS").name == "runs"
 
-    def test_quoted_arguments_stay_together(self):
+    def test_given_a_quoted_argument_when_parsed_then_it_stays_together(self):
         result = parse('/reject 7f2a "not what I asked for"')
-        self.assertEqual(result.args, ["7f2a", "not what I asked for"])
+        assert result.args == ["7f2a", "not what I asked for"]
 
-    def test_arg_joins_the_rest(self):
-        self.assertEqual(parse("/set mode auto").arg, "mode auto")
+    def test_given_several_arguments_when_arg_is_read_then_they_are_joined(self):
+        assert parse("/set mode auto").arg == "mode auto"
 
-    def test_a_bare_slash_is_an_error(self):
-        with self.assertRaises(ParseError):
-            parse("/")
+    @pytest.mark.parametrize("line", ["/", "/   "])
+    def test_given_a_bare_slash_when_parsed_then_it_is_an_error(self, line):
+        with pytest.raises(ParseError):
+            parse(line)
 
-    def test_an_unbalanced_quote_still_parses(self):
+    def test_given_an_unbalanced_quote_when_parsed_then_the_words_are_split_on_spaces(self):
         result = parse('/reject 7f2a "unclosed')
-        self.assertEqual(result.name, "reject")
+        assert result.name == "reject"
+        assert result.args == ["7f2a", '"unclosed']
 
 
-class Tasks(unittest.TestCase):
-    def test_plain_text_is_a_task(self):
+class TestTasks:
+    def test_given_plain_text_when_parsed_then_it_is_a_task(self):
         result = parse("add rate limiting to the API")
-        self.assertIsInstance(result, TaskIntent)
-        self.assertEqual(result.text, "add rate limiting to the API")
-        self.assertIsNone(result.ref)
-        self.assertEqual(result.overrides, {})
+        assert isinstance(result, TaskIntent)
+        assert result.text == "add rate limiting to the API"
+        assert result.ref is None
+        assert result.overrides == {}
 
-    def test_a_reference_is_recognised(self):
+    def test_given_a_reference_when_parsed_then_it_is_recognised(self):
         result = parse("@scope-spec")
-        self.assertEqual(result.ref, "scope-spec")
-        self.assertEqual(result.text, "")
+        assert result.ref == "scope-spec"
+        assert result.text == ""
 
-    def test_text_after_a_reference_is_kept(self):
+    def test_given_text_after_a_reference_when_parsed_then_it_is_kept(self):
         result = parse("@scope-spec also add tests")
-        self.assertEqual(result.ref, "scope-spec")
-        self.assertEqual(result.text, "also add tests")
+        assert result.ref == "scope-spec"
+        assert result.text == "also add tests"
 
-    def test_a_bare_at_is_an_error(self):
-        with self.assertRaises(ParseError):
+    def test_given_a_bare_at_when_parsed_then_it_is_an_error(self):
+        with pytest.raises(ParseError):
             parse("@")
 
-    def test_an_at_later_in_the_line_is_just_text(self):
+    def test_given_an_at_later_in_the_line_when_parsed_then_it_is_just_text(self):
         result = parse("email me at @home")
-        self.assertIsNone(result.ref)
-        self.assertIn("@home", result.text)
+        assert result.ref is None
+        assert "@home" in result.text
 
 
-class Flags(unittest.TestCase):
-    def test_a_flag_is_taken_out_of_the_task(self):
+class TestFlags:
+    def test_given_a_flag_when_parsed_then_it_is_taken_out_of_the_task(self):
         result = parse("add rate limiting --mode auto")
-        self.assertEqual(result.text, "add rate limiting")
-        self.assertEqual(result.overrides, {"mode": "autonomous"})
+        assert result.text == "add rate limiting"
+        assert result.overrides == {"mode": "autonomous"}
 
-    def test_equals_form_works_too(self):
-        self.assertEqual(parse("do it --mode=auto").overrides["mode"], "autonomous")
+    def test_given_the_equals_form_when_parsed_then_it_works_too(self):
+        assert parse("do it --mode=auto").overrides["mode"] == "autonomous"
 
-    def test_flags_may_appear_anywhere(self):
+    def test_given_flags_anywhere_in_the_line_when_parsed_then_all_are_taken(self):
         result = parse("--execute codex fix the login bug --rounds 3")
-        self.assertEqual(result.text, "fix the login bug")
-        self.assertEqual(result.overrides["execute"], "codex")
-        self.assertEqual(result.overrides["rounds"], 3)
+        assert result.text == "fix the login bug"
+        assert result.overrides["execute"] == "codex"
+        assert result.overrides["rounds"] == 3
 
-    def test_several_flags_combine(self):
+    def test_given_several_flags_when_parsed_then_they_combine(self):
         result = parse("do it --plan claude --execute opencode --review codex")
-        self.assertEqual(
-            result.overrides,
-            {"plan": "claude", "execute": "opencode", "review": "codex"},
-        )
+        assert result.overrides == {"plan": "claude", "execute": "opencode", "review": "codex"}
 
-    def test_mode_accepts_the_short_forms(self):
-        for typed, stored in (("auto", "autonomous"), ("autonomous", "autonomous"),
-                              ("super", "supervised"), ("manual", "supervised")):
-            self.assertEqual(parse(f"x --mode {typed}").overrides["mode"], stored)
+    def test_given_an_upper_case_flag_name_when_parsed_then_it_is_lowered(self):
+        assert parse("do it --MODE auto").overrides == {"mode": "autonomous"}
 
-    def test_a_bad_mode_is_rejected(self):
-        with self.assertRaises(ParseError):
+    @pytest.mark.parametrize("typed, stored", [
+        ("auto", "autonomous"), ("autonomous", "autonomous"), ("AUTO", "autonomous"),
+        ("super", "supervised"), ("supervised", "supervised"), ("manual", "supervised"),
+    ])
+    def test_given_a_short_mode_form_when_parsed_then_it_is_stored_in_full(self, typed, stored):
+        assert parse(f"x --mode {typed}").overrides["mode"] == stored
+
+    def test_given_a_bad_mode_when_parsed_then_it_is_rejected(self):
+        with pytest.raises(ParseError):
             parse("x --mode sideways")
 
-    def test_counts_must_be_positive_whole_numbers(self):
-        for bad in ("0", "-1", "two", "1.5"):
-            with self.assertRaises(ParseError):
-                parse(f"x --rounds {bad}")
+    @pytest.mark.parametrize("bad", ["0", "-1", "two", "1.5"])
+    def test_given_a_count_that_is_not_a_positive_whole_number_when_parsed_then_it_is_rejected(self, bad):
+        with pytest.raises(ParseError):
+            parse(f"x --rounds {bad}")
 
-    def test_an_unknown_flag_is_refused_not_swallowed(self):
+    def test_given_a_text_flag_when_parsed_then_its_value_is_kept_as_typed(self):
+        assert parse("x --branch Fix/Thing").overrides == {"branch": "Fix/Thing"}
+
+    def test_given_an_unknown_flag_when_parsed_then_it_is_refused_not_swallowed(self):
         """A typo must not silently become part of the prompt."""
-        with self.assertRaises(ParseError) as ctx:
+        with pytest.raises(ParseError) as ctx:
             parse("add rate limiting --modes auto")
-        self.assertIn("--modes", str(ctx.exception))
+        assert "--modes" in str(ctx.value)
 
-    def test_a_flag_without_a_value_is_refused(self):
-        with self.assertRaises(ParseError):
-            parse("do it --mode")
-        with self.assertRaises(ParseError):
-            parse("do it --mode --rounds 2")
+    @pytest.mark.parametrize("line", ["do it --mode", "do it --mode --rounds 2", "do it --mode="])
+    def test_given_a_flag_without_a_value_when_parsed_then_it_is_refused(self, line):
+        with pytest.raises(ParseError) as ctx:
+            parse(line)
+        assert "needs a value" in str(ctx.value)
 
-    def test_flags_work_with_a_reference(self):
+    def test_given_flags_with_a_reference_when_parsed_then_both_are_read(self):
         result = parse("@spec --mode auto --attempts 5")
-        self.assertEqual(result.ref, "spec")
-        self.assertEqual(result.overrides["attempts"], 5)
+        assert result.ref == "spec"
+        assert result.overrides["attempts"] == 5
 
-    def test_a_line_of_only_flags_has_nothing_to_do(self):
-        with self.assertRaises(ParseError):
+    def test_given_a_line_of_only_flags_when_parsed_then_there_is_nothing_to_do(self):
+        with pytest.raises(ParseError):
             parse("--mode auto")
 
-    def test_a_lone_double_dash_in_prose_is_an_error_not_prose(self):
-        with self.assertRaises(ParseError):
+    def test_given_a_lone_double_dash_in_prose_when_parsed_then_it_is_an_error_not_prose(self):
+        with pytest.raises(ParseError):
             parse("compare -- these things")
-
-
-if __name__ == "__main__":
-    unittest.main()

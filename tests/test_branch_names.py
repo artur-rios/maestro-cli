@@ -1,183 +1,146 @@
 """Branch naming: conventional prefix plus a short, readable description."""
 
-import unittest
-import unittest.mock
+import re
+from unittest import mock
 
 from maestro import gitops
 
 
-class Slugs(unittest.TestCase):
-    def test_filler_words_are_dropped(self):
+class TestSlugs:
+    def test_given_filler_words_when_slugified_then_they_are_dropped(self):
         # The reported bug: "create-a-new-use-case-in-which-a".
         slug = gitops.slugify(
             "Create a new Use Case in which a scope owner can add one or more "
             "custom fields to a scope"
         )
-        self.assertEqual(slug, "use-case-scope-owner")
-        self.assertNotIn("-a-", f"-{slug}-")
-        self.assertNotIn("which", slug)
+        assert slug == "use-case-scope-owner"
+        assert "-a-" not in f"-{slug}-"
+        assert "which" not in slug
 
-    def test_a_leading_verb_is_dropped_because_the_prefix_implies_it(self):
-        self.assertEqual(gitops.slugify("Add a health check endpoint"),
-                         "health-check-endpoint")
-        self.assertEqual(gitops.slugify("Implement scope specific permissions"),
-                         "scope-specific-permissions")
+    def test_given_a_leading_verb_when_slugified_then_it_is_dropped_because_the_prefix_implies_it(self):
+        assert gitops.slugify("Add a health check endpoint") == "health-check-endpoint"
+        assert gitops.slugify("Implement scope specific permissions") == "scope-specific-permissions"
 
-    def test_repeated_words_are_collapsed(self):
+    def test_given_repeated_words_when_slugified_then_each_appears_once(self):
         slug = gitops.slugify("Add scope fields to a scope for scope owners")
-        self.assertEqual(len(slug.split("-")), len(set(slug.split("-"))))
+        assert len(slug.split("-")) == len(set(slug.split("-")))
 
-    def test_a_prompt_that_is_only_a_verb_still_yields_something(self):
-        self.assertTrue(gitops.slugify("create"))
+    def test_given_only_a_verb_when_slugified_then_something_is_still_returned(self):
+        assert gitops.slugify("create")
 
-    def test_slug_is_short(self):
+    def test_given_a_long_prompt_when_slugified_then_the_slug_stays_short(self):
         slug = gitops.slugify("Implement a comprehensive audit logging subsystem "
                               "covering every mutation across all services")
-        self.assertLessEqual(len(slug), 40)
-        self.assertLessEqual(len(slug.split("-")), 5)
+        assert len(slug) <= 40
+        assert len(slug.split("-")) <= 5
 
-    def test_slug_is_branch_safe(self):
+    def test_given_punctuation_when_slugified_then_the_slug_is_branch_safe(self):
         slug = gitops.slugify("Fix the OAuth2 callback (500 error!) on /auth/login")
-        self.assertRegex(slug, r"^[a-z0-9-]+$")
+        assert re.search(r"^[a-z0-9-]+$", slug)
 
-    def test_a_prompt_of_only_filler_still_yields_something(self):
-        self.assertTrue(gitops.slugify("the a of for to"))
+    def test_given_only_filler_words_when_slugified_then_something_is_still_returned(self):
+        assert gitops.slugify("the a of for to")
 
-    def test_empty_prompt_falls_back(self):
-        self.assertEqual(gitops.slugify(""), "task")
+    def test_given_an_empty_prompt_when_slugified_then_it_falls_back_to_task(self):
+        assert gitops.slugify("") == "task"
 
 
-class Types(unittest.TestCase):
-    def test_bug_wording_suggests_fix(self):
+class TestTypes:
+    def test_given_bug_wording_when_a_type_is_suggested_then_it_is_fix(self):
         for prompt in ("Fix the broken login", "The checkout crashes on submit",
                        "Payment fails with a 500 error"):
-            self.assertEqual(gitops.suggest_branch_type(prompt), "fix", prompt)
+            assert gitops.suggest_branch_type(prompt) == "fix", prompt
 
-    def test_new_work_suggests_feature(self):
+    def test_given_new_work_when_a_type_is_suggested_then_it_is_feature(self):
         for prompt in ("Create a new use case for scope owners",
                        "Add a health check endpoint"):
-            self.assertEqual(gitops.suggest_branch_type(prompt), "feature", prompt)
+            assert gitops.suggest_branch_type(prompt) == "feature", prompt
 
-    def test_hints_match_whole_words_only(self):
+    def test_given_a_hint_inside_a_longer_word_when_a_type_is_suggested_then_it_does_not_match(self):
         # "ci" lives inside "specific"; this used to come back as a chore.
-        self.assertEqual(
-            gitops.suggest_branch_type("Implement scope specific permissions"),
-            "feature",
-        )
-        self.assertEqual(
-            gitops.suggest_branch_type("Add the latest pricing table"), "feature"
-        )
+        assert gitops.suggest_branch_type("Implement scope specific permissions") == "feature"
+        assert gitops.suggest_branch_type("Add the latest pricing table") == "feature"
 
-    def test_other_categories(self):
-        self.assertEqual(gitops.suggest_branch_type("Refactor the config loader"), "refactor")
-        self.assertEqual(gitops.suggest_branch_type("Update the README"), "docs")
-        self.assertEqual(gitops.suggest_branch_type("Bump the dependency versions"), "chore")
+    def test_given_refactor_docs_or_chore_wording_when_a_type_is_suggested_then_it_matches(self):
+        assert gitops.suggest_branch_type("Refactor the config loader") == "refactor"
+        assert gitops.suggest_branch_type("Update the README") == "docs"
+        assert gitops.suggest_branch_type("Bump the dependency versions") == "chore"
 
 
-class FullNames(unittest.TestCase):
-    def test_conventional_shape(self):
+class TestFullNames:
+    def test_given_a_prompt_when_a_branch_is_suggested_then_it_has_the_conventional_shape(self):
         name = gitops.suggest_branch("Add a health check endpoint to the API")
-        self.assertTrue(name.startswith("feature/"))
-        self.assertEqual(name, "feature/health-check-endpoint-api")
+        assert name.startswith("feature/")
+        assert name == "feature/health-check-endpoint-api"
 
-    def test_explicit_type_wins(self):
+    def test_given_an_explicit_type_when_a_branch_is_suggested_then_the_type_wins(self):
         name = gitops.suggest_branch("Add a health check endpoint", "fix")
-        self.assertTrue(name.startswith("fix/"))
+        assert name.startswith("fix/")
 
-    def test_the_prefix_is_not_repeated_in_the_slug(self):
-        self.assertEqual(
-            gitops.suggest_branch("Fix the broken login redirect that crashes"),
-            "fix/broken-login-redirect-crashes",
-        )
-        self.assertEqual(
-            gitops.suggest_branch("Refactor the config loader to use pydantic"),
-            "refactor/config-loader-use-pydantic",
-        )
+    def test_given_a_verb_matching_the_type_when_a_branch_is_suggested_then_it_is_not_repeated(self):
+        assert gitops.suggest_branch("Fix the broken login redirect that crashes") == "fix/broken-login-redirect-crashes"
+        assert gitops.suggest_branch("Refactor the config loader to use pydantic") == "refactor/config-loader-use-pydantic"
 
 
-class Composing(unittest.TestCase):
+class TestComposing:
     """Typing a name must not silently discard the chosen type."""
 
     PROMPT = "Implement scope specific permissions"
 
-    def test_blank_keeps_the_suggestion(self):
-        self.assertEqual(
-            gitops.compose_branch("feature", "", self.PROMPT),
-            "feature/scope-specific-permissions",
-        )
+    def test_given_a_blank_name_when_composed_then_the_suggestion_is_kept(self):
+        assert gitops.compose_branch("feature", "", self.PROMPT) == "feature/scope-specific-permissions"
 
-    def test_a_plain_name_goes_under_the_chosen_type(self):
+    def test_given_a_plain_name_when_composed_then_it_goes_under_the_chosen_type(self):
         # The reported bug: this used to produce a bare "my-branch".
-        self.assertEqual(
-            gitops.compose_branch("feature", "scope-permissions", self.PROMPT),
-            "feature/scope-permissions",
-        )
+        assert gitops.compose_branch("feature", "scope-permissions", self.PROMPT) == "feature/scope-permissions"
 
-    def test_the_type_is_kept_even_when_it_was_not_the_suggested_one(self):
-        self.assertEqual(
-            gitops.compose_branch("chore", "scope-permissions", self.PROMPT),
-            "chore/scope-permissions",
-        )
+    def test_given_a_type_other_than_the_suggested_one_when_composed_then_it_is_kept(self):
+        assert gitops.compose_branch("chore", "scope-permissions", self.PROMPT) == "chore/scope-permissions"
 
-    def test_an_explicit_prefix_overrides_the_chosen_type(self):
-        self.assertEqual(
-            gitops.compose_branch("feature", "fix/login-redirect", self.PROMPT),
-            "fix/login-redirect",
-        )
+    def test_given_an_explicit_prefix_when_composed_then_it_overrides_the_chosen_type(self):
+        assert gitops.compose_branch("feature", "fix/login-redirect", self.PROMPT) == "fix/login-redirect"
 
-    def test_a_typed_name_is_sanitised(self):
-        self.assertEqual(
-            gitops.compose_branch("feature", "My New Thing!", self.PROMPT),
-            "feature/My-New-Thing",
-        )
+    def test_given_a_name_with_spaces_and_punctuation_when_composed_then_it_is_sanitised(self):
+        assert gitops.compose_branch("feature", "My New Thing!", self.PROMPT) == "feature/My-New-Thing"
 
-    def test_whitespace_only_counts_as_blank(self):
-        self.assertEqual(
-            gitops.compose_branch("fix", "   ", self.PROMPT),
-            gitops.suggest_branch(self.PROMPT, "fix"),
-        )
+    def test_given_only_whitespace_when_composed_then_it_counts_as_blank(self):
+        assert gitops.compose_branch("fix", "   ", self.PROMPT) == gitops.suggest_branch(self.PROMPT, "fix")
 
-    def test_the_subject_survives_without_the_verb(self):
-        self.assertEqual(
-            gitops.suggest_branch("Create a new use case for scope owners"),
-            "feature/use-case-scope-owners",
-        )
+    def test_given_a_use_case_prompt_when_a_branch_is_suggested_then_the_subject_survives_without_the_verb(self):
+        assert gitops.suggest_branch("Create a new use case for scope owners") == "feature/use-case-scope-owners"
 
-    def test_no_random_suffix(self):
+    def test_given_a_prompt_when_a_branch_is_suggested_then_it_has_no_random_suffix(self):
         name = gitops.suggest_branch("Add a health check endpoint")
-        self.assertNotRegex(name, r"-[0-9a-f]{8}$")
+        assert not re.search(r"-[0-9a-f]{8}$", name)
 
 
-class Sanitising(unittest.TestCase):
-    def test_spaces_and_junk_become_hyphens(self):
-        self.assertEqual(
-            gitops.sanitize_branch("feature/My New Thing!!"), "feature/My-New-Thing"
-        )
+class TestSanitising:
+    def test_given_spaces_and_junk_when_sanitised_then_they_become_hyphens(self):
+        assert gitops.sanitize_branch("feature/My New Thing!!") == "feature/My-New-Thing"
 
-    def test_collapses_repeats_and_trims(self):
-        self.assertEqual(gitops.sanitize_branch("//feature//a--b--/"), "feature/a-b")
+    def test_given_repeated_separators_when_sanitised_then_they_are_collapsed_and_trimmed(self):
+        assert gitops.sanitize_branch("//feature//a--b--/") == "feature/a-b"
 
-    def test_empty_input_falls_back(self):
-        self.assertEqual(gitops.sanitize_branch("   "), "task")
+    def test_given_blank_input_when_sanitised_then_it_falls_back_to_task(self):
+        assert gitops.sanitize_branch("   ") == "task"
 
-    def test_a_valid_name_is_left_alone(self):
-        self.assertEqual(
-            gitops.sanitize_branch("fix/login-redirect"), "fix/login-redirect"
-        )
+    def test_given_a_valid_name_when_sanitised_then_it_is_left_alone(self):
+        assert gitops.sanitize_branch("fix/login-redirect") == "fix/login-redirect"
 
 
-class Uniqueness(unittest.TestCase):
-    def test_free_name_is_returned_unchanged(self):
-        with unittest.mock.patch.object(gitops, "branch_exists", return_value=False):
-            self.assertEqual(gitops.unique_branch("/r", "feature/x"), "feature/x")
+class TestUniqueness:
+    def test_given_a_free_name_when_made_unique_then_it_is_returned_unchanged(self):
+        with mock.patch.object(gitops, "branch_exists", return_value=False):
+            assert gitops.unique_branch("/r", "feature/x") == "feature/x"
 
-    def test_taken_name_gets_a_numeric_suffix(self):
+    def test_given_taken_names_when_made_unique_then_the_next_free_number_is_appended(self):
         taken = {"feature/x", "feature/x-2"}
-        with unittest.mock.patch.object(
+        with mock.patch.object(
             gitops, "branch_exists", side_effect=lambda r, n: n in taken
         ):
-            self.assertEqual(gitops.unique_branch("/r", "feature/x"), "feature/x-3")
+            assert gitops.unique_branch("/r", "feature/x") == "feature/x-3"
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_given_every_numbered_name_taken_when_made_unique_then_a_random_suffix_is_used(self):
+        with mock.patch.object(gitops, "branch_exists", return_value=True):
+            name = gitops.unique_branch("/r", "feature/x")
+        assert re.fullmatch(r"feature/x-[0-9a-f]{6}", name)
