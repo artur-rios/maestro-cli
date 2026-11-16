@@ -68,24 +68,30 @@ def stream(wf: Workflow, roles: set[str] | None, is_running) -> None:
     closed: set[tuple[str, int, int | None]] = set()
     interrupted = False
 
+    def follow_once() -> list:
+        steps = [s for s in wf.steps if roles is None or s.role.value in roles]
+        for index, step in enumerate(steps):
+            key = (step.role.value, step.round, index)
+            if key not in opened:
+                render.out(step_marker(step, starting=True))
+                opened.add(key)
+            if step.log_path:
+                offsets[key] = drain(Path(step.log_path), offsets.get(key, 0))
+            if step.status in (Status.DONE, Status.FAILED) and key not in closed:
+                render.out(step_marker(step, starting=False))
+                closed.add(key)
+        return steps
+
     try:
         while True:
-            steps = [s for s in wf.steps if roles is None or s.role.value in roles]
-            for index, step in enumerate(steps):
-                key = (step.role.value, step.round, index)
-                if key not in opened:
-                    render.out(step_marker(step, starting=True))
-                    opened.add(key)
-                if step.log_path:
-                    offsets[key] = drain(Path(step.log_path), offsets.get(key, 0))
-                if step.status in (Status.DONE, Status.FAILED) and key not in closed:
-                    render.out(step_marker(step, starting=False))
-                    closed.add(key)
-
+            steps = follow_once()
             still_going = is_running(wf.id) or any(
                 s.status in (Status.PENDING, Status.RUNNING) for s in steps
             )
             if not still_going:
+                # The run may have ended after this pass read the logs: one more pass prints
+                # the last output and the closing markers. Nothing writes after it stopped.
+                follow_once()
                 break
             time.sleep(0.4)
     except KeyboardInterrupt:

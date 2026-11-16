@@ -155,6 +155,27 @@ class TestStream:
         assert capsys.readouterr().out == "first\nsecond\n"
         assert screen().count("execute finished") == 1
 
+    def test_given_a_step_that_ends_after_its_log_was_read_when_the_run_stops_then_its_last_output_is_printed(
+            self, tmp_path, screen, capsys):
+        wf = make(Status.EXECUTING)
+        step = step_with_log(wf, tmp_path, Role.EXECUTE, "first\n", status=Status.RUNNING)
+
+        def is_running(workflow_id):
+            # The poll has drained "first"; now the step writes its last line, finishes and the
+            # run's thread exits, all before this check.
+            with open(step.log_path, "a", encoding="utf-8") as handle:
+                handle.write("last\n")
+            step.status = Status.DONE
+            wf.status = Status.MERGED
+            return False
+
+        logview.stream(wf, None, is_running)
+
+        assert capsys.readouterr().out == "first\nlast\n"
+        shown = screen()
+        assert shown.count("execute finished") == 1
+        assert shown.index("execute finished") < shown.index("end of log for all steps")
+
     def test_given_a_failed_run_with_notes_when_streamed_then_the_failure_and_the_notes_are_shown(
             self, tmp_path, screen):
         wf = make(Status.FAILED)
