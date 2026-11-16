@@ -14,6 +14,10 @@ dependencies = [
     "questionary>=2.0",
 ]
 
+[project.optional-dependencies]
+# What the test suite needs on top of the runtime dependencies (ci/build.sh pins exact versions).
+test = ["pytest>=8", "coverage>=7"]
+
 [project.scripts]
 maestro = "maestro.cli:main"
 mst = "maestro.cli:main"
@@ -25,3 +29,16 @@ include = ["maestro*"]
 # ruff's long-standing default rules, pyflakes (F) and pycodestyle's errors (E4, E7, E9), named so that a newer ruff
 # with a wider default set does not change what ci/lint.sh checks.
 select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["maestro"]
+
+[tool.coverage.report]
+# The floor ci/build.sh enforces. Raise it when coverage rises; never lower it.
+fail_under = 97
+show_missing = true
+skip_covered = true
