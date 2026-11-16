@@ -1,10 +1,9 @@
 """Pausing a run, and picking it up again."""
 
-import os
-import tempfile
 import threading
-import unittest
 from unittest import mock
+
+import pytest
 
 from maestro.backends import RunResult
 from maestro.gitops import GitError
@@ -21,167 +20,190 @@ from maestro.runner import Runner
 from maestro.store import Store
 
 
-class PauseTestCase(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("MAESTRO_HOME")
-        os.environ["MAESTRO_HOME"] = self.tmp.name
-        self.addCleanup(self.tmp.cleanup)
-
+class PauseBase:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.tmp = tmp_path
         self.store = Store()
         self.runner = Runner(self.store)
-        self.git = mock.patch("maestro.runner.gitops").start()
+        self.git = mock.MagicMock()
+        monkeypatch.setattr("maestro.runner.gitops", self.git)
         self.git.GitError = GitError
         self.git.diff.return_value = "diff"
         self.git.short_status.return_value = ""
         self.git.recent_commits.return_value = ""
         self.commits = 0
         self.git.commit_count.side_effect = lambda *a, **k: self.commits
-        self.addCleanup(mock.patch.stopall)
         self.executed: list[str] = []
-
-    def tearDown(self):
-        if self._old is None:
-            os.environ.pop("MAESTRO_HOME", None)
-        else:
-            os.environ["MAESTRO_HOME"] = self._old
+        # Set by a test that wants the first execute step held open.
+        self.started = threading.Event()
+        self.release: threading.Event | None = None
+        # Every agent call goes to the fake, never to a CLI on the machine.
+        monkeypatch.setattr("maestro.runner.backends.run", self.agent)
+        yield
+        if self.release is not None:
+            self.release.set()
+        for thread in list(self.runner._threads.values()):
+            thread.join(timeout=10)
 
     def make(self, status=Status.PENDING, tasks=None):
         wf = Workflow(
-            prompt="build the thing", repo_path=self.tmp.name, base_branch="main",
+            prompt="build the thing", repo_path=str(self.tmp), base_branch="main",
             agents={"plan": "claude", "execute": "opencode", "review": "claude"},
             mode=Mode.AUTONOMOUS, max_rounds=1, max_attempts=1,
         )
         wf.branch = "feature/thing"
         wf.branch_created = True
-        wf.worktree = self.tmp.name
+        wf.worktree = str(self.tmp)
         wf.plan_text = "the plan"
         wf.status = status
         wf.tasks = tasks or []
         self.store.add(wf)
         return wf
 
-    def agent(self):
-        def _run(name, role, prompt, cwd, log_file, backends=None, model=""):
-            if role is Role.EXECUTE:
-                self.executed.append(prompt)
-                self.commits += 1
-                return RunResult(0, "done")
-            if role is Role.PLAN:
-                return RunResult(0, "plan\n\nTASKS:\n1. one\n2. two\n")
-            return RunResult(0, "VERDICT: APPROVE")
-        return _run
+    def agent(self, name, role, prompt, cwd, log_file, backends=None, model=""):
+        if role is Role.EXECUTE:
+            self.started.set()
+            if self.release is not None:
+                assert self.release.wait(timeout=10), "the test never released the agent"
+            self.executed.append(prompt)
+            self.commits += 1
+            return RunResult(0, "done")
+        if role is Role.PLAN:
+            return RunResult(0, "plan\n\nTASKS:\n1. one\n2. two\n")
+        return RunResult(0, "VERDICT: APPROVE")
 
     def drive(self, wf, cancel=None, pause=None):
-        with mock.patch("maestro.runner.backends.run",
-                        side_effect=self.agent()):
-            self.runner._run(wf, cancel or threading.Event(), pause)
+        self.runner._run(wf, cancel or threading.Event(), pause)
+
+    def join(self, wf):
+        thread = self.runner._threads.get(wf.id)
+        if thread:
+            thread.join(timeout=10)
+            assert not thread.is_alive()
+
+    def pause_mid_run(self, wf):
+        """Start the run, pause it while its agent works, then let the agent finish."""
+        self.release = threading.Event()
+        self.runner.start(wf)
+        assert self.started.wait(timeout=10)
+        self.runner.pause(wf)
+        self.release.set()
+        self.join(wf)
+        self.release = None
 
 
-class Pausing(PauseTestCase):
-    def test_a_pause_stops_the_run_before_the_next_step(self):
+class TestPausing(PauseBase):
+    def test_given_a_set_pause_flag_when_the_run_starts_then_it_stops_before_the_next_step(self):
         wf = self.make(tasks=[Task(1, "first")])
         paused = threading.Event()
         paused.set()
 
         self.drive(wf, pause=paused)
 
-        self.assertIs(wf.status, Status.PAUSED)
-        self.assertEqual(self.executed, [])
+        assert wf.status is Status.PAUSED
+        assert self.executed == []
 
-    def test_the_message_says_how_to_carry_on(self):
+    def test_given_a_paused_run_when_its_message_is_read_then_it_says_how_to_carry_on(self):
         wf = self.make()
         paused = threading.Event()
         paused.set()
         self.drive(wf, pause=paused)
-        self.assertIn("/resume", wf.message)
+        assert "/resume" in wf.message
 
-    def test_pausing_an_idle_run_marks_it_immediately(self):
+    def test_given_an_agent_at_work_when_paused_then_it_finishes_its_step_and_the_run_stops_before_review(self):
+        wf = self.make(tasks=[Task(1, "first")])
+        self.pause_mid_run(wf)
+        assert wf.status is Status.PAUSED, wf.message
+        assert len(self.executed) == 1  # the step in flight was not killed
+        assert not any(s.role is Role.REVIEW for s in wf.steps)
+
+    def test_given_an_idle_run_when_paused_then_it_is_marked_immediately(self):
         wf = self.make(Status.FAILED)
         self.runner.pause(wf)
-        self.assertIs(wf.status, Status.PAUSED)
+        assert wf.status is Status.PAUSED
+        assert Store().get(wf.id).status is Status.PAUSED
 
-    def test_a_merged_run_cannot_be_paused(self):
+    def test_given_a_merged_run_when_paused_then_it_stays_merged(self):
         wf = self.make(Status.MERGED)
         self.runner.pause(wf)
-        self.assertIs(wf.status, Status.MERGED)
+        assert wf.status is Status.MERGED
 
-    def test_paused_is_neither_running_nor_finished(self):
+    def test_given_the_paused_status_when_classified_then_it_is_neither_running_nor_finished(self):
         """It must survive a restart and not be swept up by /clear finished."""
-        self.assertNotIn(Status.PAUSED, ACTIVE_STATUSES)
-        self.assertNotIn(Status.PAUSED, TERMINAL_STATUSES)
+        assert Status.PAUSED not in ACTIVE_STATUSES
+        assert Status.PAUSED not in TERMINAL_STATUSES
 
-    def test_an_orphan_sweep_leaves_a_paused_run_alone(self):
+    def test_given_a_paused_run_when_orphans_are_swept_then_it_is_left_alone(self):
         wf = self.make(Status.PAUSED)
-        self.assertEqual(Runner(self.store).adopt_orphans(), 0)
-        self.assertIs(wf.status, Status.PAUSED)
+        assert Runner(self.store).adopt_orphans() == 0
+        assert wf.status is Status.PAUSED
 
-    def test_a_paused_run_survives_a_reload(self):
+    def test_given_a_paused_run_when_the_store_is_reopened_then_it_is_still_paused(self):
         wf = self.make(Status.PAUSED)
-        self.assertIs(Store().get(wf.id).status, Status.PAUSED)
+        assert Store().get(wf.id).status is Status.PAUSED
 
-    def test_pause_is_not_cancel(self):
+    def test_given_a_set_cancel_flag_when_the_run_starts_then_it_is_cancelled_not_paused(self):
         """Cancelling ends a run; pausing leaves it to be continued."""
         wf = self.make()
         cancelled = threading.Event()
         cancelled.set()
         self.drive(wf, cancel=cancelled)
-        self.assertIs(wf.status, Status.CANCELLED)
+        assert wf.status is Status.CANCELLED
 
 
-class ResumingAfterPause(PauseTestCase):
+class TestResumingAfterPause(PauseBase):
     def resume(self, wf):
-        with mock.patch("maestro.runner.backends.run",
-                        side_effect=self.agent()):
-            self.runner.resume(wf)
-            thread = self.runner._threads.get(wf.id)
-            if thread:
-                thread.join(timeout=10)
+        self.runner.resume(wf)
+        self.join(wf)
 
-    def test_a_paused_run_carries_on(self):
+    def test_given_a_run_paused_mid_flight_when_resumed_then_it_carries_on_to_the_merge(self):
         wf = self.make(tasks=[Task(1, "first"), Task(2, "second")])
-        self.runner.start(wf)
-        self.runner._threads[wf.id].join(timeout=10)
-        self.runner.pause(wf)
-        self.assertIs(wf.status, Status.PAUSED)
+        self.pause_mid_run(wf)
+        assert wf.status is Status.PAUSED
 
         self.resume(wf)
-        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
+        assert wf.status is Status.MERGED, wf.message
+        assert len(self.executed) == 2  # each item ran once, none again
 
-    def test_the_pause_flag_is_cleared_on_resume(self):
+    def test_given_a_run_paused_mid_flight_when_resumed_then_the_pause_flag_is_cleared(self):
         """Otherwise the resumed thread stops again at the first boundary."""
         wf = self.make(tasks=[Task(1, "first")])
-        self.runner.start(wf)
-        self.runner._threads[wf.id].join(timeout=10)
-        self.runner.pause(wf)
+        self.pause_mid_run(wf)
+        assert self.runner._pauses[wf.id].is_set()
 
         self.resume(wf)
-        self.assertIsNot(wf.status, Status.PAUSED)
+        assert not self.runner._pauses[wf.id].is_set()
+        assert wf.status is Status.MERGED, wf.message
 
-    def test_finished_items_are_kept_when_resuming(self):
+    def test_given_finished_items_when_resumed_then_only_the_rest_run(self):
         wf = self.make(Status.PAUSED, tasks=[
             Task(1, "first", Status.DONE), Task(2, "second"),
         ])
         self.resume(wf)
-        self.assertEqual(len(self.executed), 1)
-        self.assertIn("Work on item 2", self.executed[0])
+        assert len(self.executed) == 1
+        assert "Work on item 2" in self.executed[0]
 
-    def test_a_failed_run_can_also_be_resumed(self):
-        wf = self.make(Status.FAILED, tasks=[Task(1, "first", Status.FAILED)])
+    @pytest.mark.parametrize("status, task_status", [
+        (Status.FAILED, Status.FAILED), (Status.CANCELLED, Status.PENDING),
+    ])
+    def test_given_a_stopped_run_when_resumed_then_it_finishes(self, status, task_status):
+        wf = self.make(status, tasks=[Task(1, "first", task_status)])
         self.resume(wf)
-        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
+        assert wf.status is Status.MERGED, wf.message
 
-    def test_a_cancelled_run_can_also_be_resumed(self):
-        wf = self.make(Status.CANCELLED, tasks=[Task(1, "first")])
-        self.resume(wf)
-        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
-
-    def test_resuming_does_not_consume_a_rework_round(self):
+    def test_given_a_paused_run_when_resumed_then_no_rework_round_is_consumed(self):
         wf = self.make(Status.PAUSED, tasks=[Task(1, "first")])
         before = wf.round
         self.resume(wf)
-        self.assertEqual(wf.round, before)
+        assert wf.round == before
 
+    def test_given_a_run_still_working_when_resumed_then_nothing_new_starts(self):
+        wf = self.make(tasks=[Task(1, "first")])
+        self.release = threading.Event()
+        self.runner.start(wf)
+        assert self.started.wait(timeout=10)
+        thread = self.runner._threads[wf.id]
 
-if __name__ == "__main__":
-    unittest.main()
+        self.runner.resume(wf)
+        assert self.runner._threads[wf.id] is thread

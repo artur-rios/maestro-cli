@@ -731,12 +731,19 @@ unmodified.
 ## Tests
 
 ```bash
-python -m unittest discover -s tests -t .
+pip install -e ".[test]"
+python -m pytest
 ```
 
-511 tests. The unit tests fake git and the CLIs; the integration tests drive a
-real git repository with a stub agent script, so the suite needs no AI tool
-installed.
+About 830 pytest tests, named `test_given_<context>_when_<action>_then_<outcome>`. The unit tests fake git and
+the CLIs; the integration tests drive a real git repository (so they need git) with a stub agent script, so the
+suite needs no AI tool installed. Every test gets its own `MAESTRO_HOME` (`tests/conftest.py`), and none of them
+sleeps or waits for a real timeout. The `build` check (`ci/build.sh`) runs the suite under coverage, with the floor
+set in `pyproject.toml`:
+
+```bash
+python -m coverage run -m pytest && python -m coverage report
+```
 
 ## Contributing
 

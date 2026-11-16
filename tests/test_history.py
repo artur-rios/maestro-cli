@@ -1,9 +1,8 @@
 """Resuming a stopped run (the history commands live in test_shell)."""
 
-import os
-import tempfile
-import unittest
 from unittest import mock
+
+import pytest
 
 from maestro.backends import RunResult
 from maestro.gitops import GitError
@@ -12,39 +11,31 @@ from maestro.runner import Runner
 from maestro.store import Store
 
 
-class Resuming(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self._old = os.environ.get("MAESTRO_HOME")
-        os.environ["MAESTRO_HOME"] = self.tmp.name
+class TestResuming:
+    @pytest.fixture(autouse=True)
+    def _setup(self, tmp_path, monkeypatch):
+        self.tmp = tmp_path
         self.store = Store()
         self.runner = Runner(self.store)
-        self.git = mock.patch("maestro.runner.gitops").start()
+        self.git = mock.MagicMock()
+        monkeypatch.setattr("maestro.runner.gitops", self.git)
         self.git.GitError = GitError
         self.git.diff.return_value = "diff"
         self.git.short_status.return_value = ""
         self.git.recent_commits.return_value = ""
         self.commits = 0
         self.git.commit_count.side_effect = lambda *a, **k: self.commits
-        self.addCleanup(mock.patch.stopall)
-        self.addCleanup(self.tmp.cleanup)
         self.execute_prompts: list[str] = []
-
-    def tearDown(self):
-        if self._old is None:
-            os.environ.pop("MAESTRO_HOME", None)
-        else:
-            os.environ["MAESTRO_HOME"] = self._old
 
     def make(self, status, tasks=None):
         wf = Workflow(
-            prompt="build the thing", repo_path=self.tmp.name, base_branch="main",
+            prompt="build the thing", repo_path=str(self.tmp), base_branch="main",
             agents={"plan": "claude", "execute": "opencode", "review": "claude"},
             mode=Mode.AUTONOMOUS, max_rounds=2, max_attempts=1,
         )
         wf.branch = "feature/thing"
         wf.branch_created = True
-        wf.worktree = self.tmp.name
+        wf.worktree = str(self.tmp)
         wf.plan_text = "the plan"
         wf.status = status
         wf.tasks = tasks or []
@@ -68,8 +59,9 @@ class Resuming(unittest.TestCase):
             thread = self.runner._threads.get(wf.id)
             if thread:
                 thread.join(timeout=10)
+                assert not thread.is_alive()
 
-    def test_finished_items_are_kept_and_only_the_rest_run(self):
+    def test_given_a_failed_checklist_when_resumed_then_finished_items_are_kept_and_only_the_rest_run(self):
         wf = self.make(Status.FAILED, tasks=[
             Task(1, "first", Status.DONE),
             Task(2, "second", Status.FAILED, attempts=1),
@@ -77,53 +69,49 @@ class Resuming(unittest.TestCase):
         ])
         self.run_resumed(wf)
 
-        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
-        self.assertEqual(len(self.execute_prompts), 2)  # not the finished one
-        self.assertIn("Work on item 2", self.execute_prompts[0])
-        self.assertIn("Work on item 3", self.execute_prompts[1])
+        assert wf.status is Status.MERGED, wf.message
+        assert len(self.execute_prompts) == 2  # not the finished one
+        assert "Work on item 2" in self.execute_prompts[0]
+        assert "Work on item 3" in self.execute_prompts[1]
 
-    def test_a_stalled_item_is_queued_again_with_its_attempts_reset(self):
+    def test_given_a_stalled_item_when_resumed_then_it_is_queued_again_with_its_attempts_reset(self):
         stalled = Task(1, "first", Status.FAILED, attempts=3)
         wf = self.make(Status.FAILED, tasks=[stalled])
         self.run_resumed(wf)
-        self.assertIs(stalled.status, Status.DONE)
-        self.assertEqual(stalled.attempts, 1)
+        assert stalled.status is Status.DONE
+        assert stalled.attempts == 1
 
-    def test_resuming_does_not_consume_a_rework_round(self):
+    def test_given_a_failed_run_when_resumed_then_no_rework_round_is_consumed(self):
         wf = self.make(Status.FAILED, tasks=[Task(1, "first")])
         before = wf.round
         self.run_resumed(wf)
-        self.assertEqual(wf.round, before)
+        assert wf.round == before
 
-    def test_a_retry_does_consume_a_round(self):
+    def test_given_requested_changes_when_retried_then_a_round_is_consumed(self):
         wf = self.make(Status.CHANGES_REQUESTED, tasks=[Task(1, "first", Status.DONE)])
         before = wf.round
         with mock.patch("maestro.runner.backends.run", side_effect=self.agent()):
             self.runner.retry(wf)
             self.runner._threads[wf.id].join(timeout=10)
-        self.assertEqual(wf.round, before + 1)
+        assert wf.round == before + 1
 
-    def test_an_interrupted_run_can_be_resumed(self):
+    def test_given_a_run_interrupted_by_an_exit_when_resumed_then_it_finishes(self):
         """adopt_orphans marks these FAILED; resume is the cure."""
         wf = self.make(Status.EXECUTING, tasks=[Task(1, "first")])
         Runner(self.store).adopt_orphans()
-        self.assertIs(wf.status, Status.FAILED)
-        self.assertIn("interrupted", wf.message)
+        assert wf.status is Status.FAILED
+        assert "interrupted" in wf.message
 
         self.run_resumed(wf)
-        self.assertIs(wf.status, Status.MERGED, msg=wf.message)
+        assert wf.status is Status.MERGED, wf.message
 
-    def test_a_merged_run_is_not_resumable(self):
+    def test_given_a_merged_run_when_resumed_then_nothing_runs(self):
         wf = self.make(Status.MERGED)
         self.run_resumed(wf)
-        self.assertEqual(self.execute_prompts, [])
+        assert self.execute_prompts == []
 
-    def test_the_stale_failure_message_is_cleared(self):
+    def test_given_a_stale_failure_message_when_resumed_then_it_is_cleared(self):
         wf = self.make(Status.FAILED, tasks=[Task(1, "first")])
         wf.message = "something went wrong earlier"
         self.run_resumed(wf)
-        self.assertNotIn("went wrong earlier", wf.message)
-
-
-if __name__ == "__main__":
-    unittest.main()
+        assert "went wrong earlier" not in wf.message
